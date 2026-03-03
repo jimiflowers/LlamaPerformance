@@ -69,7 +69,50 @@ Run a single inference request to verify the model responds.
 Check whether the model is currently loaded and healthy on the remote server.
 
 ### GET /models/:id/logs
-Get log entries for this model. Query param: `limit` (default 100).
+Returns live runtime data for the model from the llama.cpp server, plus recent benchmark history.
+
+```json
+{
+  "slots": [
+    {
+      "id": 0,
+      "state": 0,
+      "n_ctx": 4096,
+      "n_past": 0,
+      "timings": {
+        "predicted_per_second": 42.3,
+        "prompt_per_second": 210.5,
+        "predicted_n": 128,
+        "prompt_n": 64
+      }
+    }
+  ],
+  "props": {
+    "total_slots": 1,
+    "default_generation_settings": {
+      "n_ctx": 4096,
+      "temperature": 0.8,
+      "top_p": 0.95,
+      "top_k": 40
+    }
+  },
+  "recentBenchmarks": [
+    {
+      "runId": "run_xyz",
+      "suiteName": "default",
+      "startedAt": 1705680000,
+      "scenario": "Simple Q&A - Short",
+      "tps": 45.3,
+      "genTps": 52.1,
+      "ttft": 320,
+      "latencyP95": 1050,
+      "errorRate": 0
+    }
+  ]
+}
+```
+
+`slots` is `null` if llama.cpp is not reachable or the model is not loaded. `props` is `null` if the `/props` endpoint is unavailable. Requires llama.cpp to be started without `--no-slots`.
 
 ---
 

@@ -10,7 +10,7 @@ function Models() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showLogsModal, setShowLogsModal] = useState(false);
   const [selectedModel, setSelectedModel] = useState(null);
-  const [logs, setLogs] = useState([]);
+  const [modelInfo, setModelInfo] = useState(null);
   const [newModel, setNewModel] = useState({ alias: '', model_id: '' });
 
   // Memoize model filtering to avoid recalculation on every render
@@ -121,7 +121,7 @@ function Models() {
   const handleViewLogs = async (model) => {
     try {
       const res = await modelsAPI.logs(model.id);
-      setLogs(res.data.logs);
+      setModelInfo(res.data);
       setSelectedModel(model);
       setShowLogsModal(true);
     } catch (err) {
@@ -233,9 +233,9 @@ function Models() {
                     <button 
                       className="btn btn-secondary" 
                       onClick={() => handleViewLogs(model)}
-                      title="View logs"
+                      title="View live status and benchmark history"
                     >
-                      Logs
+                      Info
                     </button>
                     <button 
                       className="btn btn-danger" 
@@ -326,30 +326,110 @@ function Models() {
         </div>
       )}
 
-      {/* Logs Modal */}
+      {/* Model Info Modal */}
       {showLogsModal && (
         <div className="modal-overlay" onClick={() => setShowLogsModal(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
+          <div className="modal" style={{ maxWidth: '700px', width: '95%' }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              Logs: {selectedModel?.alias}
+              Model Info: {selectedModel?.alias}
             </div>
-            <div style={{ maxHeight: '400px', overflow: 'auto', background: '#f8f9fa', padding: '1rem', borderRadius: '4px', fontFamily: 'monospace', fontSize: '0.85rem' }}>
-              {logs.length === 0 ? (
-                <p>No logs available</p>
+            <div style={{ maxHeight: '520px', overflowY: 'auto' }}>
+
+              {/* ── Slot state (llama.cpp /slots) ── */}
+              {modelInfo?.slots?.length > 0 ? (
+                <div style={{ marginBottom: '1.25rem' }}>
+                  <strong style={{ display: 'block', marginBottom: '0.5rem', color: '#2c3e50' }}>Live Slot Status</strong>
+                  {modelInfo.slots.map((slot, i) => {
+                    const t = slot.timings || {};
+                    const stateColor = slot.state === 0 ? '#27ae60' : '#e67e22';
+                    return (
+                      <div key={i} style={{ background: '#f8f9fa', borderRadius: '6px', padding: '0.75rem', marginBottom: '0.5rem', border: '1px solid #ecf0f1' }}>
+                        <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap', fontSize: '0.9rem' }}>
+                          <span><strong>Slot {slot.id}</strong> — <span style={{ color: stateColor }}>{slot.state === 0 ? 'idle' : 'processing'}</span></span>
+                          {slot.n_ctx > 0 && <span>Context: <strong>{slot.n_past || 0} / {slot.n_ctx}</strong> tokens</span>}
+                          {t.predicted_per_second > 0 && <span>Gen speed: <strong>{t.predicted_per_second.toFixed(1)} t/s</strong></span>}
+                          {t.prompt_per_second > 0 && <span>Prompt speed: <strong>{t.prompt_per_second.toFixed(1)} t/s</strong></span>}
+                          {t.predicted_n > 0 && <span>Generated: <strong>{t.predicted_n}</strong> tokens</span>}
+                          {t.prompt_n > 0 && <span>Prompt: <strong>{t.prompt_n}</strong> tokens</span>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               ) : (
-                logs.map(log => (
-                  <div key={log.id} style={{ marginBottom: '0.5rem', borderBottom: '1px solid #ecf0f1', paddingBottom: '0.5rem' }}>
-                    <span style={{ color: log.level === 'error' ? '#e74c3c' : '#2c3e50' }}>
-                      [{new Date(log.created_at * 1000).toLocaleString()}] {log.level.toUpperCase()}: {log.message}
-                    </span>
-                  </div>
-                ))
+                <div style={{ background: '#f8f9fa', borderRadius: '6px', padding: '0.75rem', marginBottom: '1.25rem', color: '#7f8c8d', fontSize: '0.9rem' }}>
+                  Slot data not available — model may not be loaded or llama.cpp is not reachable.
+                </div>
               )}
+
+              {/* ── Server props (llama.cpp /props) ── */}
+              {modelInfo?.props && (
+                <div style={{ marginBottom: '1.25rem' }}>
+                  <strong style={{ display: 'block', marginBottom: '0.5rem', color: '#2c3e50' }}>Server Configuration</strong>
+                  <div style={{ background: '#f8f9fa', borderRadius: '6px', padding: '0.75rem', border: '1px solid #ecf0f1' }}>
+                    <table style={{ width: '100%', fontSize: '0.85rem', borderCollapse: 'collapse' }}>
+                      <tbody>
+                        {[
+                          ['Total slots', modelInfo.props.total_slots],
+                          ['Context size', modelInfo.props.default_generation_settings?.n_ctx],
+                          ['Max predict', modelInfo.props.default_generation_settings?.n_predict],
+                          ['Temperature', modelInfo.props.default_generation_settings?.temperature],
+                          ['Top-P', modelInfo.props.default_generation_settings?.top_p],
+                          ['Top-K', modelInfo.props.default_generation_settings?.top_k],
+                        ].filter(([, v]) => v !== undefined && v !== null).map(([label, value]) => (
+                          <tr key={label}>
+                            <td style={{ color: '#7f8c8d', paddingRight: '1rem', paddingBottom: '0.2rem', whiteSpace: 'nowrap' }}>{label}</td>
+                            <td style={{ fontWeight: 500 }}>{value}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* ── Recent benchmark results ── */}
+              {modelInfo?.recentBenchmarks?.length > 0 ? (
+                <div>
+                  <strong style={{ display: 'block', marginBottom: '0.5rem', color: '#2c3e50' }}>Recent Benchmark Results</strong>
+                  <table className="table" style={{ fontSize: '0.8rem' }}>
+                    <thead>
+                      <tr>
+                        <th>Date</th>
+                        <th>Suite</th>
+                        <th>Scenario</th>
+                        <th>TPS</th>
+                        <th>GenTPS</th>
+                        <th>TTFT</th>
+                        <th>P95</th>
+                        <th>Errors</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {modelInfo.recentBenchmarks.map((b, i) => (
+                        <tr key={i}>
+                          <td style={{ whiteSpace: 'nowrap' }}>{new Date(b.startedAt).toLocaleDateString()}</td>
+                          <td>{b.suiteName}</td>
+                          <td style={{ maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.scenario}</td>
+                          <td>{b.tps != null ? b.tps.toFixed(1) : '—'}</td>
+                          <td>{b.genTps != null ? b.genTps.toFixed(1) : '—'}</td>
+                          <td>{b.ttft != null ? `${b.ttft.toFixed(0)}ms` : '—'}</td>
+                          <td>{b.latencyP95 != null ? `${b.latencyP95.toFixed(0)}ms` : '—'}</td>
+                          <td>{b.errorRate != null ? `${(b.errorRate * 100).toFixed(0)}%` : '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div style={{ color: '#7f8c8d', fontSize: '0.9rem' }}>
+                  No benchmark results yet for this model.
+                </div>
+              )}
+
             </div>
             <div style={{ marginTop: '1rem' }}>
-              <button className="btn btn-secondary" onClick={() => setShowLogsModal(false)}>
-                Close
-              </button>
+              <button className="btn btn-secondary" onClick={() => setShowLogsModal(false)}>Close</button>
             </div>
           </div>
         </div>
