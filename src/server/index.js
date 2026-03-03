@@ -198,7 +198,7 @@ app.post('/api/benchmarks/run', async (req, res) => {
       suiteName, 
       suite, 
       config || { iterations: 3 }, // Valor por defecto si no viene
-      (p) => logger.info(`[BENCHMARK] Progreso: ${p.progress}%`),
+      (p) => p.progress != null && logger.info(`[BENCHMARK] Progreso: ${p.progress}%`),
       { returnImmediately: true }
     );
 
