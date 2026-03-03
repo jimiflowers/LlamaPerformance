@@ -36,9 +36,9 @@ function Dashboard() {
     <div>
       <h2 style={{ marginBottom: '1.5rem', fontSize: '2rem' }}>Dashboard</h2>
 
-      {systemHealth && systemHealth.status !== 'healthy' && (
+      {systemHealth && systemHealth.status === 'unhealthy' && (
         <div className="error">
-          System Health: {systemHealth.status} - {systemHealth.error}
+          System Health: unhealthy — {systemHealth.error || 'Llama.cpp server is not responding'}
         </div>
       )}
 

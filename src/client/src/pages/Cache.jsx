@@ -90,7 +90,7 @@ function Cache() {
   return (
     <div className="page">
       <h2>Cache Management</h2>
-      <p>Manage Foundry Local cache directory to access custom models</p>
+      <p>View the active model inventory and switch the llama.cpp API endpoint at runtime</p>
 
       {error && (
         <div style={{
@@ -257,27 +257,21 @@ function Cache() {
 
       {/* Instructions */}
       <div className="card" style={{ marginTop: '1.5rem', backgroundColor: '#f9f9f9' }}>
-        <h3>How to Use Custom Models</h3>
+        <h3>How it works</h3>
         <ol style={{ marginTop: '1rem', lineHeight: '1.8', paddingLeft: '1.5rem' }}>
           <li>
-            Compile your model to ONNX format and place it in a cache directory
+            The model list comes from <code>models.json</code> — managed via <strong>Settings → SSH &amp; Model Discovery</strong>
           </li>
           <li>
-            Enter the path to your cache directory above and click "Switch to Custom"
+            The "Switch to Custom" field changes the active llama.cpp API endpoint for the current session
           </li>
           <li>
-            Custom models will appear in the Models page dropdown with a 🔧 badge
-          </li>
-          <li>
-            You can load and benchmark custom models just like catalog models
-          </li>
-          <li>
-            Click "Restore Default" to switch back to the default Foundry cache
+            Click "Restore Default" to go back to the URL saved in Settings
           </li>
         </ol>
         <div style={{ marginTop: '1rem', padding: '1rem', backgroundColor: '#fff', borderRadius: '4px', border: '1px solid #ddd' }}>
-          <strong>Note:</strong> Switching cache directories will change which models are available to Foundry Local.
-          Make sure your custom models are properly compiled and compatible with Foundry Local.
+          <strong>Note:</strong> To permanently change the API URL or update the model list, use the <strong>Settings</strong> page.
+          Changes made here are session-only and are lost on server restart.
         </div>
       </div>
     </div>

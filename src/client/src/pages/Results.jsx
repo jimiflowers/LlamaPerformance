@@ -88,19 +88,42 @@ function Results() {
     }
   };
 
+  const handleDeleteRun = async () => {
+    if (!selectedRun) return;
+    if (!window.confirm('Delete this benchmark run permanently? This cannot be undone.')) return;
+    try {
+      await benchmarksAPI.deleteRun(selectedRun);
+      const remaining = runs.filter(r => r.id !== selectedRun);
+      setRuns(remaining);
+      setResults([]);
+      setSelectedRun(remaining.length > 0 ? remaining[0].id : null);
+    } catch (err) {
+      setError(err.response?.data?.error || err.message);
+    }
+  };
+
   const handleExport = async (format) => {
     try {
-      const res = format === 'json' 
+      const res = format === 'json'
         ? await benchmarksAPI.exportJSON(selectedRun)
         : await benchmarksAPI.exportCSV(selectedRun);
-      
-      const blob = new Blob([res.data], { 
-        type: format === 'json' ? 'application/json' : 'text/csv' 
+
+      const blob = new Blob([res.data], {
+        type: format === 'json' ? 'application/json' : 'text/csv'
       });
+
+      const run = runs.find(r => r.id === selectedRun);
+      const modelPart = (run?.model_aliases?.join('+') || selectedRun)
+        .replace(/[^a-zA-Z0-9_\-+]/g, '_').substring(0, 60);
+      const datePart = run?.started_at
+        ? new Date(run.started_at).toISOString().replace(/[:.]/g, '-').substring(0, 19)
+        : selectedRun;
+      const filename = `benchmark_${modelPart}_${datePart}.${format}`;
+
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `benchmark-${selectedRun}.${format}`;
+      a.download = filename;
       a.click();
       window.URL.revokeObjectURL(url);
     } catch (err) {
@@ -249,6 +272,9 @@ function Results() {
                 </button>
                 <button className="btn btn-secondary" onClick={() => handleExport('csv')}>
                   Export CSV
+                </button>
+                <button className="btn btn-danger" onClick={handleDeleteRun} title="Delete this run permanently">
+                  Delete Run
                 </button>
               </div>
             </div>

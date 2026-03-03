@@ -4,14 +4,18 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# Results (local outputs)
-results/*
-!results/example/
-!results/storage.json
+# Results (local outputs — never commit personal benchmark data)
+results/
 
-# Environment variables
+# Environment variables (contain personal URLs and credentials)
 .env
 .env.local
+
+# Runtime configuration (contains personal API URLs and SSH credentials)
+settings.json
+
+# Model inventory (personal, generated via Settings → SSH scan)
+models.json
 
 # Build outputs
 dist/

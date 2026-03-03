@@ -35,7 +35,7 @@ function Models() {
   const loadModels = async () => {
     try {
       const res = await modelsAPI.getAll();
-      setModels(res.data.models);
+      setModels(Array.isArray(res.data) ? res.data : (res.data.models || []));
       setError(null);
     } catch (err) {
       setError(err.response?.data?.error || err.message);
@@ -47,7 +47,7 @@ function Models() {
   const loadAvailableModels = async () => {
     try {
       const res = await modelsAPI.getAvailable();
-      setAvailableModels(res.data.models);
+      setAvailableModels(Array.isArray(res.data) ? res.data : (res.data.models || []));
     } catch (err) {
       console.error('Failed to load available models:', err);
     }

@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -33,7 +33,16 @@ export const benchmarksAPI = {
   exportJSON: (id) => api.get(`/benchmarks/runs/${id}/export/json`, { responseType: 'blob' }),
   exportCSV: (id) => api.get(`/benchmarks/runs/${id}/export/csv`, { responseType: 'blob' }),
   logs: (id, limit = 100) => api.get(`/benchmarks/runs/${id}/logs`, { params: { limit } }),
-  status: (id) => api.get(`/benchmarks/runs/${id}/status`)
+  status: (id) => api.get(`/benchmarks/runs/${id}/status`),
+  deleteRun: (id) => api.delete(`/benchmarks/runs/${id}`)
+};
+
+// Settings API
+export const settingsAPI = {
+  get: () => api.get('/settings'),
+  update: (data) => api.put('/settings', data),
+  sshScan: () => api.post('/settings/ssh-scan'),
+  syncModels: (models) => api.post('/settings/sync-models', { models })
 };
 
 // System API
@@ -48,8 +57,8 @@ export const cacheAPI = {
     const response = await api.get('/cache/location');
     return response.data;
   },
-  switchCache: async (path) => {
-    const response = await api.post('/cache/switch', { path });
+  switchCache: async (location) => {
+    const response = await api.post('/cache/switch', { location });
     return response.data;
   },
   listModels: async () => {

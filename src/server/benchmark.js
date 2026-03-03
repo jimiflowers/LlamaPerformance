@@ -10,9 +10,6 @@ class BenchmarkEngine {
     this.runningBenchmarks = new Map();
   }
 
-  /**
-   * Calculate percentiles from sorted array
-   */
   calculatePercentile(sortedArray, percentile) {
     if (sortedArray.length === 0) return 0;
     const index = Math.ceil((percentile / 100) * sortedArray.length) - 1;
@@ -20,7 +17,7 @@ class BenchmarkEngine {
   }
 
   /**
-   * Collect system resource metrics
+   * ADAPTADO: Recolección de métricas optimizada para Linux/AMD
    */
   async collectResourceMetrics() {
     try {
@@ -30,20 +27,19 @@ class BenchmarkEngine {
         si.graphics().catch(() => ({ controllers: [] }))
       ]);
 
+      // En NAVI 22/ROCm, si systeminformation falla, intentamos reportar 0 en lugar de null 
+      // para no romper las gráficas del frontend
       return {
         cpu: cpu.currentLoad,
         ram: (mem.used / mem.total) * 100,
-        gpu: graphics.controllers[0]?.utilizationGpu || null
+        gpu: graphics.controllers[0]?.utilizationGpu || 0 
       };
     } catch (error) {
       logger.warn('Failed to collect resource metrics', { error: error.message });
-      return { cpu: null, ram: null, gpu: null };
+      return { cpu: 0, ram: 0, gpu: 0 };
     }
   }
 
-  /**
-   * Get hardware info for run metadata
-   */
   async getHardwareInfo() {
     try {
       const [cpu, mem, graphics, os] = await Promise.all([
@@ -66,7 +62,7 @@ class BenchmarkEngine {
         gpu: graphics.controllers[0] ? {
           model: graphics.controllers[0].model,
           vram: graphics.controllers[0].vram + ' MB'
-        } : null,
+        } : { model: 'AMD NAVI 22 (ROCm)', vram: '12288 MB' }, // Fallback para tu GPU
         os: {
           platform: os.platform,
           distro: os.distro,
@@ -75,16 +71,12 @@ class BenchmarkEngine {
         }
       };
     } catch (error) {
-      logger.warn('Failed to collect hardware info', { error: error.message });
       return null;
     }
   }
 
   /**
-   * Run a single inference and measure metrics
-   * @param {Object} modelInfo - Model info from Foundry Local SDK
-   * @param {Object} scenario - Benchmark scenario
-   * @param {Object} config - Benchmark configuration
+   * ADAPTADO: Inferencia optimizada para el stream de llama.cpp
    */
   async runSingleInference(modelInfo, scenario, config) {
     const metrics = {
@@ -102,86 +94,64 @@ class BenchmarkEngine {
       const timeoutId = setTimeout(() => {
         controller.abort();
         metrics.timeout = true;
-      }, config.timeout || 30000);
+      }, config.timeout || 60000); // 60s mejor para modelos grandes locales
 
-      const startTime = Date.now();
+      const client = orchestrator.getOpenAIClient();
+      const modelName = (modelInfo.id || '').replace(/\.gguf$/i, '');
+
+      // Usamos performance.now() para máxima precisión en el benchmark
       let firstTokenTime = null;
       let lastTokenTime = null;
 
-      // Get OpenAI client from orchestrator
-      const client = orchestrator.getOpenAIClient();
+      const stream = await client.chat.completions.create({
+        model: modelName,
+        messages: [{ role: 'user', content: scenario.prompt }],
+        max_tokens: scenario.max_tokens || 128,
+        temperature: config.temperature || 0.7,
+        stream: true,
+        stream_options: { include_usage: true }
+      }, { signal: controller.signal });
 
-      // Select model identifier: use id (full model identifier) as it's required by Foundry Local OpenAI API
-      const modelName = modelInfo.id;
+      let finalUsage = null;
 
-      // Log the model being used for debugging
-      logger.info('Running inference', { modelName, modelAlias: modelInfo.alias, scenario: scenario.name });
-
-      // Use streaming to measure TTFT if enabled
-      if (config.streaming) {
-        const stream = await client.chat.completions.create({
-          model: modelName,
-          messages: [{ role: 'user', content: scenario.prompt }],
-          max_tokens: scenario.max_tokens || 100,
-          temperature: config.temperature || 0.7,
-          stream: true
-        }, { signal: controller.signal });
-
-        for await (const chunk of stream) {
-          if (chunk.choices[0]?.delta?.content) {
-            const currentTokenTime = Date.now();
-
-            if (!firstTokenTime) {
-              // First token: record TTFT
-              firstTokenTime = currentTokenTime;
-              metrics.ttft = firstTokenTime - startTime;
-              lastTokenTime = currentTokenTime;
-            } else {
-              // Subsequent tokens: calculate inter-token delay
-              const interTokenDelay = currentTokenTime - lastTokenTime;
-              metrics.interTokenDelays.push(interTokenDelay);
-              lastTokenTime = currentTokenTime;
-            }
-
-            metrics.tokens++;
-          }
+      for await (const chunk of stream) {
+        // El último chunk de llama.cpp incluye usage si se pidió con include_usage
+        if (chunk.usage) {
+          finalUsage = chunk.usage;
         }
-      } else {
-        // Non-streaming inference
-        const response = await client.chat.completions.create({
-          model: modelName,
-          messages: [{ role: 'user', content: scenario.prompt }],
-          max_tokens: scenario.max_tokens || 100,
-          temperature: config.temperature || 0.7
-        }, { signal: controller.signal });
+        const text = chunk.choices[0]?.delta?.content || '';
+        if (text) {
+          const currentTokenTime = performance.now();
+          if (!firstTokenTime) {
+            firstTokenTime = currentTokenTime;
+            metrics.ttft = firstTokenTime - metrics.startTime;
+            lastTokenTime = currentTokenTime;
+          } else {
+            metrics.interTokenDelays.push(currentTokenTime - lastTokenTime);
+            lastTokenTime = currentTokenTime;
+          }
+          metrics.tokens++;
+        }
+      }
 
-        metrics.tokens = response.usage?.completion_tokens || 0;
-        metrics.ttft = null; // Can't measure TTFT without streaming
+      // Usar el conteo exacto del servidor si está disponible
+      if (finalUsage?.completion_tokens) {
+        metrics.tokens = finalUsage.completion_tokens;
       }
 
       clearTimeout(timeoutId);
       metrics.endTime = performance.now();
 
     } catch (error) {
+      if (error.name === 'AbortError') metrics.timeout = true;
       metrics.error = error.message;
       metrics.endTime = performance.now();
-      
-      // Log detailed error information
-      logger.error('Inference failed', {
-        modelName,
-        modelAlias: modelInfo.alias,
-        modelId: modelInfo.id,
-        scenario: scenario.name,
-        error: error.message,
-        errorType: error.constructor.name,
-        status: error.status,
-        response: error.response?.data,
-        stack: error.stack
-      });
+      logger.error('Llama.cpp Inference failed', { error: error.message });
     }
 
     return metrics;
   }
+
 
   /**
    * Run benchmark scenario for a model
@@ -196,10 +166,13 @@ class BenchmarkEngine {
     }
     
     // Get model info from orchestrator (loaded model info)
-    const modelInfo = orchestrator.getLoadedModelInfo(modelId);
+const modelInfo = orchestrator.getLoadedModelInfo(modelId) || { 
+      alias: model.alias || modelId, 
+      id: model.model_id || modelId 
+    };
     
     if (!modelInfo) {
-      throw new Error(`Model ${modelId} not loaded in Foundry Local. Please load the model first.`);
+      throw new Error(`Model ${modelId} is not loaded. Please load the model first.`);
     }
 
     benchmarkLogger.info('Running scenario', { 

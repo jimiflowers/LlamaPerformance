@@ -17,6 +17,7 @@ function Benchmarks() {
     streaming: true
   });
   const [loading, setLoading] = useState(false);
+  const [modelsLoading, setModelsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [currentRunId, setCurrentRunId] = useState(null);
@@ -70,9 +71,12 @@ function Benchmarks() {
   const loadModels = async () => {
     try {
       const res = await modelsAPI.getAll();
-      setModels(res.data.models.filter(m => m.status === 'running'));
+      const list = Array.isArray(res.data) ? res.data : (res.data.models || []);
+      setModels(list.filter(m => m.status === 'running'));
     } catch (err) {
       setError(err.response?.data?.error || err.message);
+    } finally {
+      setModelsLoading(false);
     }
   };
 
@@ -343,7 +347,7 @@ function Benchmarks() {
         </div>
       )}
 
-      {models.length === 0 && (
+      {!modelsLoading && models.length === 0 && (
         <div className="error">
           No running models available. Please start at least one model service in the Models tab before running benchmarks.
         </div>
@@ -461,7 +465,7 @@ function Benchmarks() {
           <p style={{ marginBottom: '1rem', color: '#7f8c8d' }}>
             Select one or more models to benchmark (only running services are shown):
           </p>
-          {models.length === 0 ? (
+          {!modelsLoading && models.length === 0 ? (
             <p style={{ color: '#e74c3c' }}>No running models available</p>
           ) : (
             <div>

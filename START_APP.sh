@@ -1,10 +1,9 @@
 #!/bin/bash
-# START_APP.sh - FLPerformance Application Startup Script
-# Starts both backend and frontend servers
+# START_APP.sh - LlamaPerformance Application Startup Script
 
 echo ""
 echo "==================================================="
-echo "     FLPerformance Application Startup"
+echo "     LlamaPerformance Application Startup"
 echo "==================================================="
 echo ""
 
@@ -12,32 +11,19 @@ echo ""
 cd "$(dirname "$0")"
 PROJECT_DIR=$(pwd)
 
-echo "📂 Project Directory: $PROJECT_DIR"
+echo "Project Directory: $PROJECT_DIR"
 
 # Check if node_modules exists
 if [ ! -d "node_modules" ]; then
     echo ""
-    echo "⚠️  Dependencies not installed!"
-    echo "Run ./scripts/install.sh first"
+    echo "Dependencies not installed! Run:"
+    echo "  npm run setup"
     exit 1
 fi
 
-# Check if Foundry Local is installed
+# Start both servers via concurrently
 echo ""
-echo "🔍 Checking Foundry Local installation..."
-node scripts/check-foundry.js
-if [ $? -ne 0 ]; then
-    echo ""
-    echo "⚠️  Foundry Local is not installed!"
-    echo "Please install Foundry Local from:"
-    echo "https://github.com/microsoft/foundry-local"
-    exit 1
-fi
-
-echo "✅ Foundry Local installed"
-
-# Start servers using concurrently
-echo ""
-echo "🚀 Starting both servers..."
+echo "Starting backend (port 3001) and frontend (port 3000)..."
+echo "Open http://localhost:3000 once both servers are ready."
 echo ""
 npm run dev

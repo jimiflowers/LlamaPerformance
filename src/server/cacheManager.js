@@ -1,251 +1,111 @@
-import { execFile } from 'child_process';
-import { promisify } from 'util';
+import axios from 'axios';
+import fs from 'fs/promises';
 import path from 'path';
-import fs from 'fs';
+import { fileURLToPath } from 'url';
 import logger from './logger.js';
 
-const execFilePromise = promisify(execFile);
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 class CacheManager {
   constructor() {
-    this.defaultCachePath = null;
+    this.llamaApiUrl = process.env.LLAMA_API_URL || '';
+    // Ruta al inventario que acabamos de crear
+    this.inventoryPath = path.join(__dirname, '../../models.json');
   }
 
   /**
-   * Get current cache directory location
+   * Devuelve la ubicación configurada (Inventario + API Remota)
    */
   async getCurrentLocation() {
-    try {
-      logger.info('Getting current cache location');
-      const { stdout, stderr } = await execFilePromise('foundry', ['cache', 'location']);
-
-      if (stderr && !stderr.includes('Service is Started')) {
-        logger.warn('Cache location command stderr', { stderr });
-      }
-
-      // Parse output: "💾 Cache directory path: /path/to/cache"
-      const match = stdout.match(/Cache directory path:\s*(.+)/);
-      if (match && match[1]) {
-        const location = match[1].trim();
-
-        // Store default cache path on first call
-        if (!this.defaultCachePath) {
-          this.defaultCachePath = location;
-          logger.info('Stored default cache path', { path: this.defaultCachePath });
-        }
-
-        return location;
-      }
-
-      throw new Error('Could not parse cache location from output');
-
-    } catch (error) {
-      logger.error('Failed to get cache location', { error: error.message });
-      throw new Error(`Failed to get cache location: ${error.message}`);
-    }
+    return this.llamaApiUrl || 'Not configured';
   }
 
-  /**
-   * Get default cache path (stored on first read)
-   */
   getDefaultPath() {
-    return this.defaultCachePath;
+    return this.llamaApiUrl;
   }
 
   /**
-   * Validate cache path to prevent command injection and path traversal
+   * Cambia dinámicamente el endpoint del Host B si fuera necesario
    */
-  validateCachePath(cachePath) {
-    if (typeof cachePath !== 'string') {
-      throw new Error('Cache path must be a non-empty string');
-    }
-
-    const trimmedPath = cachePath.trim();
-
-    if (!trimmedPath) {
-      throw new Error('Cache path must be a non-empty string');
-    }
-
-    // Check for null bytes which can be used for injection
-    if (trimmedPath.includes('\0')) {
-      throw new Error('Cache path contains invalid characters');
-    }
-
-    // Normalize and resolve to absolute path
-    const normalized = path.resolve(trimmedPath);
-
-    // Resolve symlinks to get the real path
-    let realPath;
+  async switchCache(apiUrl) {
     try {
-      realPath = fs.realpathSync(normalized);
-    } catch (error) {
-      // If path doesn't exist yet, use the normalized path
-      // but verify parent directories
-      const parentDir = path.dirname(normalized);
-      try {
-        realPath = fs.realpathSync(parentDir);
-        realPath = path.join(realPath, path.basename(normalized));
-      } catch (parentError) {
-        // Parent doesn't exist either, use normalized
-        realPath = normalized;
-      }
-    }
+      this.llamaApiUrl = apiUrl === 'default'
+        ? (process.env.LLAMA_API_URL || '')
+        : apiUrl;
 
-    // Additional security: prevent access to sensitive system directories
-    const sensitivePatterns = [
-      /^\/etc($|\/)/i,
-      /^\/sys($|\/)/i,
-      /^\/proc($|\/)/i,
-      /^\/root($|\/)/i,
-      /^\/var\/root($|\/)/i,
-      /^\/bin($|\/)/i,
-      /^\/sbin($|\/)/i,
-      /^C:\\Windows($|\\)/i,
-      /^C:\\Program Files($|\\)/i,
-      /^C:\\Program Files \(x86\)($|\\)/i
-    ];
-
-    for (const pattern of sensitivePatterns) {
-      if (pattern.test(realPath)) {
-        throw new Error('Cache path cannot point to system directories');
-      }
-    }
-
-    return realPath;
-  }
-
-  /**
-   * Switch to a different cache directory
-   * @param {string} cachePath - Path to cache directory, or "default" to restore original
-   */
-  async switchCache(cachePath) {
-    try {
-      let targetPath = cachePath;
-
-      // Capture default cache path BEFORE switching (if not already captured)
-      if (!this.defaultCachePath) {
-        const currentLocation = await this.getCurrentLocation();
-        // Don't call getCurrentLocation again - it's already captured
-      }
-
-      // Handle "default" keyword
-      if (targetPath === 'default') {
-        if (!this.defaultCachePath) {
-          throw new Error('Default cache path not available');
-        }
-        targetPath = this.defaultCachePath;
-      }
-
-      // Validate and normalize path for cross-platform compatibility
-      const normalizedPath = this.validateCachePath(targetPath);
-
-      logger.info('Switching cache directory', { targetPath, normalizedPath });
-      
-      // Use execFile with args array to prevent command injection
-      const { stderr } = await execFilePromise('foundry', ['cache', 'cd', normalizedPath]);
-
-      if (stderr && !stderr.includes('Service is Started')) {
-        logger.warn('Cache switch command stderr', { stderr });
-      }
-
-      // Get the new location WITHOUT updating defaultCachePath
-      const { stdout } = await execFilePromise('foundry', ['cache', 'location']);
-      const match = stdout.match(/Cache directory path:\s*(.+)/);
-      const newLocation = match && match[1] ? match[1].trim() : normalizedPath;
-
-      logger.info('Cache directory switched', {
-        requested: normalizedPath,
-        actual: newLocation
-      });
+      logger.info('Endpoint de la GPU actualizado', { newApi: this.llamaApiUrl });
 
       return {
         success: true,
-        location: newLocation,
-        isDefault: newLocation === this.defaultCachePath
+        location: this.llamaApiUrl,
+        isDefault: true
       };
-
     } catch (error) {
-      logger.error('Failed to switch cache', { cachePath, error: error.message });
-      
-      // Mark validation errors with statusCode for proper HTTP response
-      if (error.message.includes('Cache path') || 
-          error.message.includes('system directories') ||
-          error.message.includes('invalid characters')) {
-        const validationError = new Error(error.message);
-        validationError.statusCode = 400;
-        throw validationError;
-      }
-      
-      throw new Error(`Failed to switch cache: ${error.message}`);
+      logger.error('Error al cambiar el endpoint', { error: error.message });
+      throw new Error(`Error al cambiar endpoint: ${error.message}`);
     }
   }
 
   /**
-   * List models in current cache
+   * LA CLAVE: Lee el JSON para saber qué modelos existen y cuáles tienen mmproj.
+   * Si el JSON falla, intenta preguntar al API como último recurso.
    */
   async listCacheModels() {
     try {
-      logger.info('Listing models in cache');
-      const { stdout, stderr } = await execFilePromise('foundry', ['cache', 'ls']);
+      const data = await fs.readFile(this.inventoryPath, 'utf8');
+      const inventoryModels = JSON.parse(data);
 
-      if (stderr && !stderr.includes('Service is Started')) {
-        logger.warn('Cache list command stderr', { stderr });
-      }
+      return inventoryModels.map(model => {
+        // 1. Limpiamos el alias de cualquier etiqueta previa para evitar "(Vision) (Vision)"
+        const baseAlias = model.alias.replace(/\(Vision\)/g, '').replace(/\(Text\)/g, '').trim();
+        const typeLabel = model.mmproj ? '(Vision)' : '(Text)';
+        const finalDisplayName = `${baseAlias} ${typeLabel}`;
 
-      // Parse output:
-      // Models cached on device:
-      //    Alias                                             Model ID
-      // 💾 phi-3.5-mini                                      Phi-3.5-mini-instruct-generic-cpu:1
-      // 💾 rakuten-ai-7b-onnx                                rakuten-ai-7b-onnx
-
-      const models = [];
-      const lines = stdout.split('\n');
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        // Skip non-model lines (no leading 💾) and empty lines
-        if (!trimmed.startsWith('💾')) continue;
-
-        // Parse model line: "💾 alias                    model_id"
-        const parts = trimmed.split(/\s{2,}/); // Split by 2+ spaces
-        if (parts.length >= 2) {
-          // Format after split: ["💾 alias", "model_id"]
-          // Remove emoji from first part
-          const aliasPart = parts[0].replace('💾', '').trim();
-          const id = parts[1].trim();
-
-          models.push({
-            alias: aliasPart,
-            id,
-            description: aliasPart,
-            source: 'cache'
-          });
-        }
-      }
-
-      logger.info('Cache models listed', { count: models.length });
-      return models;
-
+        // 2. Devolvemos un objeto "todoterreno" para el Frontend
+        return {
+          id: model.id,           // El nombre del archivo .gguf (Ej: Qwen2.5-VL-7B.gguf)
+          model_id: model.id,     // Duplicamos para asegurar que el POST lo encuentre
+          name: model.id,         // Triplicamos por si el componente usa .name
+          alias: finalDisplayName, // Lo que se verá en el input "Model Alias"
+          description: finalDisplayName, 
+          mmproj: model.mmproj,
+          source: 'inventory'
+        };
+      });
     } catch (error) {
-      logger.error('Failed to list cache models', { error: error.message });
-      // Don't throw - return empty array as fallback
-      logger.warn('Returning empty cache models list');
+      logger.error('Error al leer inventario', { error: error.message });
       return [];
     }
   }
 
   /**
-   * Check if foundry CLI is available
+   * Fallback: Lista solo lo que el servidor remoto informa en ese momento
+   */
+  async _listRemoteFallback() {
+    try {
+      const response = await axios.get(`${this.llamaApiUrl}/v1/models`, { timeout: 2000 });
+      if (response.data && Array.isArray(response.data.data)) {
+        return response.data.data.map(m => ({
+          id: m.id,
+          alias: m.id,
+          mmproj: null,
+          description: `Remote GGUF: ${m.id}`,
+          source: 'remote-api'
+        }));
+      }
+      return [];
+    } catch (e) {
+      logger.error('Fallback fallido: El servidor remoto no responde');
+      return [];
+    }
+  }
+
+  /**
+   * Como estamos en Linux/Docker, siempre asumimos que la capacidad está disponible
    */
   async checkCLIAvailable() {
-    try {
-      const command = process.platform === 'win32' ? 'where' : 'which';
-      await execFilePromise(command, ['foundry']);
-      return true;
-    } catch (error) {
-      logger.error('Foundry CLI not found in PATH');
-      return false;
-    }
+    return true; 
   }
 }
 

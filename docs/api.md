@@ -1,207 +1,122 @@
-# API Documentation
-
-This document describes the REST API endpoints provided by FLPerformance.
+# API Reference
 
 **Base URL:** `http://localhost:3001/api`
 
-## Models API
+All error responses use the format `{ "error": "message" }` with an appropriate 4xx/5xx status code.
+
+---
+
+## Models
 
 ### GET /models/available
-List available models from the Foundry Local catalog.
+Returns the model inventory from `models.json` as a direct array. Returns `[]` if `models.json` does not exist.
 
-**Response:**
 ```json
-{
-  "models": [
-    {
-      "id": "phi-3-mini-4k-instruct",
-      "alias": "phi-3-mini",
-      "description": "Phi-3 Mini 4K Instruct"
-    }
-  ]
-}
+[
+  {
+    "id": "Llama-3.1-8B-Instruct-Q6_K.gguf",
+    "model_id": "Llama-3.1-8B-Instruct-Q6_K.gguf",
+    "alias": "Llama 3.1 8B Instruct Q6 K (Text)",
+    "mmproj": null,
+    "source": "inventory"
+  }
+]
 ```
 
 ### GET /models
-List all configured models in the application.
+Returns all models in the application database with runtime status, as a direct array.
 
-**Response:**
 ```json
-{
-  "models": [
-    {
-      "id": "model_123",
-      "alias": "phi-3-mini",
-      "model_id": "phi-3-mini-4k-instruct",
-      "endpoint": "http://localhost:5000",
-      "status": "running",
-      "last_error": null,
-      "last_heartbeat": 1705680000,
-      "created_at": 1705670000,
-      "updated_at": 1705680000
-    }
-  ]
-}
+[
+  {
+    "id": "Llama-3.1-8B-Instruct-Q6_K.gguf",
+    "alias": "Llama 3.1 8B",
+    "model_id": "Llama-3.1-8B-Instruct-Q6_K.gguf",
+    "status": "running",
+    "created_at": 1705670000,
+    "updated_at": 1705680000
+  }
+]
 ```
 
 ### POST /models
-Add a new model configuration.
+Add a model to the database.
 
-**Request Body:**
-```json
-{
-  "alias": "phi-3-mini",
-  "model_id": "phi-3-mini-4k-instruct"
-}
-```
-
-**Response:**
-```json
-{
-  "model": {
-    "id": "model_123",
-    "alias": "phi-3-mini",
-    "model_id": "phi-3-mini-4k-instruct",
-    "status": "stopped"
-  }
-}
-```
+**Body:** `{ "alias": "My Model", "model_id": "model.gguf" }`
 
 ### DELETE /models/:id
-Remove a model configuration.
-
-**Response:**
-```json
-{
-  "success": true
-}
-```
+Remove a model from the database.
 
 ### POST /models/:id/start
-Start a Foundry Local service for this model.
+Load the model into llama-swap (sends `/models/load` to the remote server).
+For vision models the `mmproj` path is automatically included.
 
-**Response:**
 ```json
-{
-  "success": true,
-  "endpoint": "http://localhost:5000",
-  "port": 5000
-}
+{ "success": true }
 ```
 
 ### POST /models/:id/stop
-Stop the Foundry Local service for this model.
+Unload the model from llama-swap.
 
-**Response:**
+### POST /models/:id/test
+Run a single inference request to verify the model responds.
+
 ```json
-{
-  "success": true
-}
-```
-
-### POST /models/:id/load
-Load the model (triggers download if needed).
-
-**Response:**
-```json
-{
-  "success": true
-}
+{ "success": true, "response": "Hello! ...", "latency": 890 }
 ```
 
 ### GET /models/:id/health
-Check service health.
-
-**Response:**
-```json
-{
-  "status": "running",
-  "healthy": true,
-  "endpoint": "http://localhost:5000",
-  "lastCheck": 1705680000
-}
-```
+Check whether the model is currently loaded and healthy on the remote server.
 
 ### GET /models/:id/logs
-Get service logs.
+Get log entries for this model. Query param: `limit` (default 100).
 
-**Query Parameters:**
-- `limit` (optional, default: 100): Number of log entries to return
+---
 
-**Response:**
-```json
-{
-  "logs": [
-    {
-      "id": 1,
-      "entity_type": "service",
-      "entity_id": "model_123",
-      "level": "info",
-      "message": "Service started",
-      "metadata": null,
-      "created_at": 1705680000
-    }
-  ]
-}
-```
-
-## Benchmarks API
+## Benchmarks
 
 ### GET /benchmarks/suites
-List available benchmark suites.
+List available benchmark suites from `benchmarks/suites/`.
 
-**Response:**
 ```json
 {
   "suites": [
-    {
-      "name": "default",
-      "description": "Default benchmark suite",
-      "scenarios": [...]
-    }
+    { "name": "default", "description": "Default benchmark suite", "scenarios": [...] }
   ]
 }
 ```
 
 ### POST /benchmarks/run
-Start a benchmark run.
+Start an async benchmark run. Returns immediately; poll `/benchmarks/runs` for status.
 
-**Request Body:**
+**Body:**
 ```json
 {
-  "modelIds": ["model_123", "model_456"],
+  "modelIds": ["model_abc123"],
   "suiteName": "default",
   "config": {
     "iterations": 5,
     "concurrency": 1,
-    "timeout": 30000,
+    "timeout": 60000,
     "temperature": 0.7,
     "streaming": true
   }
 }
 ```
 
-**Response:**
-```json
-{
-  "success": true,
-  "message": "Benchmark started"
-}
-```
+**Response:** `{ "success": true, "runId": "run_xyz", "message": "Benchmark started" }`
 
 ### GET /benchmarks/runs
-List all benchmark runs.
+List all benchmark runs, enriched with `model_aliases`.
 
-**Response:**
 ```json
 {
   "runs": [
     {
-      "id": "run_123",
+      "id": "run_xyz",
       "suite_name": "default",
-      "model_ids": ["model_123"],
-      "config": {...},
-      "hardware_info": {...},
+      "model_ids": ["model_abc123"],
+      "model_aliases": ["Llama 3.1 8B"],
       "status": "completed",
       "started_at": 1705680000,
       "completed_at": 1705681000
@@ -211,25 +126,23 @@ List all benchmark runs.
 ```
 
 ### GET /benchmarks/runs/:id
-Get specific benchmark run with results.
+Get a specific run with its results.
 
-**Response:**
 ```json
 {
-  "run": {...},
+  "run": { ... },
   "results": [
     {
-      "id": "result_123",
-      "run_id": "run_123",
-      "model_id": "model_123",
-      "scenario": "Simple Q&A",
+      "model_id": "model_abc123",
+      "scenario": "Simple Q&A - Short",
       "tps": 45.3,
-      "ttft": 120,
+      "gen_tps": 52.1,
+      "ttft": 320,
+      "tpot": 19.2,
       "latency_p50": 890,
       "latency_p95": 1050,
       "latency_p99": 1180,
       "error_rate": 0,
-      "timeout_rate": 0,
       "cpu_avg": 35.2,
       "ram_avg": 42.1,
       "gpu_avg": 68.5
@@ -238,105 +151,127 @@ Get specific benchmark run with results.
 }
 ```
 
-### GET /benchmarks/results
-Get all benchmark results with optional filters.
-
-**Query Parameters:**
-- `runId` (optional): Filter by run ID
-- `modelId` (optional): Filter by model ID
-
-**Response:**
-```json
-{
-  "results": [...]
-}
-```
+### DELETE /benchmarks/runs/:id
+Permanently delete a benchmark run and all associated results and logs.
 
 ### GET /benchmarks/runs/:id/export/json
-Export benchmark results as JSON.
-
-**Response:** JSON file download
+Download run results as a JSON file.
 
 ### GET /benchmarks/runs/:id/export/csv
-Export benchmark results as CSV.
-
-**Response:** CSV file download
+Download run results as a CSV file.
 
 ### GET /benchmarks/runs/:id/logs
-Get logs for a benchmark run.
+Get log entries for a benchmark run. Query param: `limit` (default 100).
 
-**Query Parameters:**
-- `limit` (optional, default: 100): Number of log entries
+### GET /benchmarks/results
+Get all results. Query params: `runId`, `modelId` (both optional).
+
+---
+
+## Settings
+
+### GET /settings
+Return current configuration. Password is masked as `"***"` if set.
+Includes `isDefault: true` when `settings.json` has not been created yet.
+
+```json
+{
+  "llamaApiUrl": "http://gpu-host.lan:8000",
+  "port": 3001,
+  "logLevel": "info",
+  "modelsDir": "/docker/models",
+  "isDefault": false,
+  "ssh": {
+    "username": "ubuntu",
+    "password": "***",
+    "sshPort": 22,
+    "trustRelationship": true
+  }
+}
+```
+
+### PUT /settings
+Save settings and apply changes immediately (except `port`, which requires a restart).
+
+Applied immediately on save:
+- `llamaApiUrl` → updates the llama.cpp target for orchestrator and cache manager
+- `logLevel` → updates Winston log level without restart
+- `modelsDir` → updates the path used for mmproj construction on model load
+
+**Response:** `{ ...updatedSettings, restartRequired: true|false }`
+
+### POST /settings/ssh-scan
+Connect to the remote GPU server via SSH and list `.gguf` files in `modelsDir`.
+SSH host is derived from the hostname in `llamaApiUrl`.
 
 **Response:**
 ```json
 {
-  "logs": [...]
+  "models": [
+    {
+      "id": "Llama-3.1-8B-Instruct-Q6_K.gguf",
+      "alias": "Llama 3.1 8B Instruct Q6 K",
+      "mmproj": null,
+      "isNew": true
+    }
+  ],
+  "mmprojs": ["mmproj-Qwen2.5-VL-7B-F16.gguf"]
 }
 ```
 
-## System API
+### POST /settings/sync-models
+Replace `models.json` completely with the provided list.
+
+**Body:** `{ "models": [{ "id": "...", "alias": "...", "mmproj": null }] }`
+
+**Response:** `{ "success": true, "count": 5 }`
+
+---
+
+## Cache
+
+### GET /cache/location
+Returns the current llama.cpp API endpoint and default path.
+
+### POST /cache/switch
+Change the active API endpoint for the current session (not persisted to `settings.json`).
+
+**Body:** `{ "location": "http://other-host:8000" }` or `{ "location": "default" }` to restore the saved URL.
+
+### GET /cache/models
+List models from `models.json` (same as `/models/available`).
+
+---
+
+## System
 
 ### GET /system/health
-Overall system health check.
+Returns service health and llama.cpp connectivity status.
 
-**Response:**
+`status` values:
+- `healthy` — llama.cpp server is reachable
+- `unhealthy` — URL is configured but server is not responding
+- `not_configured` — no Llama API URL has been saved in Settings yet
+
 ```json
 {
   "status": "healthy",
-  "foundryLocal": "available",
+  "gpuServer": "online",
+  "endpoint": "http://gpu-host.lan:8000/v1",
   "timestamp": 1705680000
 }
 ```
 
 ### GET /system/stats
-Get dashboard statistics.
+Dashboard statistics.
 
-**Response:**
 ```json
 {
-  "totalModels": 2,
+  "totalModels": 3,
   "runningServices": 1,
-  "totalRuns": 5,
-  "lastRun": {...},
-  "bestTpsModel": {
-    "modelId": "model_123",
-    "tps": 62.1
-  },
-  "bestLatencyModel": {
-    "modelId": "model_123",
-    "p95": 780
-  }
+  "totalRuns": 12,
+  "lastRun": { ... },
+  "bestTpsModel": { "modelId": "model_abc", "tps": 62.1 },
+  "bestLatencyModel": { "modelId": "model_abc", "p95": 780 }
 }
 ```
-
-## Error Responses
-
-All endpoints return errors in the following format:
-
-**Status Code:** 4xx or 5xx
-
-**Body:**
-```json
-{
-  "error": "Error message description"
-}
-```
-
-Common status codes:
-- `400` - Bad request (invalid parameters)
-- `404` - Resource not found
-- `500` - Internal server error
-- `503` - Service unavailable
-
-## Authentication
-
-Currently, no authentication is required. The API is designed for local development only.
-
-## Rate Limiting
-
-No rate limiting is implemented. Use responsibly.
-
-## CORS
-
-CORS is enabled for all origins in development. Configure appropriately for production use.

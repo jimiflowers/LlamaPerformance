@@ -1,0 +1,12 @@
+[
+  {
+    "id": "Llama-3.1-8B-Instruct-Q6_K.gguf",
+    "alias": "Llama 3.1 8B (Q6_K)",
+    "mmproj": null
+  },
+  {
+    "id": "Qwen2.5-VL-7B-Instruct-Q5_K_M.gguf",
+    "alias": "Qwen2.5 VL 7B (Q5_K_M)",
+    "mmproj": "mmproj-Qwen2.5-VL-7B-F16.gguf"
+  }
+]
