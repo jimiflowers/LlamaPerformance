@@ -31,6 +31,7 @@ The original FLPerformance was built around Microsoft Foundry Local (Windows, ON
   - P50 / P95 / P99 latency percentiles
   - CPU, RAM, GPU utilisation
   - Error rate and performance score
+- **Multi-model sequential benchmarking**: Select any number of models — including stopped ones — and the engine loads, tests, and unloads each in sequence automatically, then shows a side-by-side comparison
 - **Multi-model comparison**: Side-by-side charts and a radar overview
 - **Vision model support**: Automatic mmproj pairing for VL models
 - **SSH model discovery**: Scan a remote directory for `.gguf` files and sync to `models.json` without leaving the UI
@@ -138,25 +139,42 @@ npm run server   # serves the built UI from the Express server on port 3001
 ### Models tab
 
 - Lists all models from `models.json`
-- **Load**: sends a load request to llama.cpp for that model
-- **Stop**: unloads the model
+- **Load**: sends a load request to llama.cpp for that model. If another model is already loaded, a dialog offers three choices: unload first, keep both (advanced — may hang on single-GPU hardware), or cancel.
+- **Unload**: unloads the model and frees VRAM
 - **Test**: runs a single inference request to verify the model responds
+- **Info**: shows live slot status from llama.cpp (`/slots`), server configuration (`/props`), and recent benchmark results for that model
+- **Params**: opens a per-model dialog to configure the llama.cpp load parameters that will be sent every time this model is loaded (manually or during a benchmark run):
 
-Models must be in **Running** state before they can be benchmarked.
+  | Parameter | Control | Description |
+  |---|---|---|
+  | `n_ctx` | Dropdown + custom input | Context window size: 4k, 8k, 16k, 24k, 32k, or any custom value in tokens |
+  | `n_batch` | Dropdown + custom input | Prompt batch size: 128, 256, 512, 1024, or custom |
+  | `flash_attn` | Checkbox | Enable Flash Attention |
+  | `cache_type_k` | Dropdown | KV-cache quantisation for K: `q4_0`, `q8_0`, `fp16` |
+  | `cache_type_v` | Dropdown | KV-cache quantisation for V: `q4_0`, `q8_0`, `fp16` |
+
+  Leave any field at *Server default* to let llama.cpp use its own startup value. Models with custom params show a **Params \*** button (highlighted in blue) as a reminder.
 
 ### Benchmarks tab
 
 1. Select a benchmark suite (the default suite has 9 scenarios)
-2. Tick one or more running models
-3. Configure iterations, concurrency, and timeout
-4. Click **Run Benchmark** — progress updates every 2 seconds
+2. Tick one or more models — **any model can be selected, regardless of whether it is currently loaded**
+3. Configure iterations, timeout, and temperature
+4. Click **Run Benchmark** — the engine will:
+   - Load each selected model in order
+   - Wait for the previous model's VRAM to be fully released before loading the next (polls `/v1/models`, up to 60 s timeout)
+   - Apply a 3-second settling pause after each load to avoid inflated TTFT on the first inference
+   - Unload every model when its tests are done (including the last one)
+5. The progress card shows the model currently under test and its position in the queue (e.g. "Testing Gemma-3-12B (2 of 3)")
 
 ### Results tab
 
 - Select any past benchmark run from the dropdown
 - View performance cards, comparison charts, and a detailed metrics table
 - **Export JSON / CSV** — filename includes model name and datetime
+- **Export PDF** — triggers the browser's print dialog; the UI (sidebar, controls) is hidden and a report header is injected automatically, so the printed output contains only charts and data tables. Use "Save as PDF" in the browser print dialog to get a PDF file.
 - **Delete Run** — permanently removes a run from storage
+- **Model Responses table** — below the Detailed Results table, a cross-table shows the actual text returned by each model for every scenario (rows = scenarios, columns = models). Cells are truncated to ~5 lines with a **Show more / Show less** toggle. The full text is always shown when printing.
 
 ### Settings tab
 
@@ -256,6 +274,9 @@ The Settings → SSH scan automatically detects mmproj files and assigns them to
 - Increase the timeout in the Benchmarks tab configuration
 - Reduce concurrency to 1
 - Large models may require more time for TTFT on first load
+
+### Multi-model benchmark slower than individual runs
+This is expected: the engine intentionally waits for VRAM to be fully freed between models (polls `/v1/models` up to 60 s) and adds a 3-second settling pause after each load. If you run benchmarks individually you skip these safety delays. The results should be comparable — if they are still significantly worse, check that no other process is using GPU memory during the run.
 
 ---
 

@@ -1,0 +1,77 @@
+{
+  "name": "default",
+  "description": "Suite de pruebas (benchmark) por defecto con escenarios comunes de evaluación de LLMs",
+  "version": "1.0.0",
+  "scenarios": [
+    {
+      "name": "Preguntas y Respuestas Simples - Corto",
+      "description": "Respuesta a pregunta corta",
+      "prompt": "¿Cuál es la capital de Francia?",
+      "max_tokens": 50,
+      "expected_output_length": "short"
+    },
+    {
+      "name": "Preguntas y Respuestas Simples - Medio",
+      "description": "Respuesta a pregunta de longitud media",
+      "prompt": "Explica cómo funciona la fotosíntesis en las plantas.",
+      "max_tokens": 150,
+      "expected_output_length": "medium"
+    },
+    {
+      "name": "Razonamiento - Acertijo Lógico",
+      "description": "Prueba de capacidades de razonamiento lógico",
+      "prompt": "Si todas las rosas son flores y algunas flores se marchitan rápido, ¿podemos concluir que algunas rosas se marchitan rápido? Explica tu razonamiento paso a paso.",
+      "max_tokens": 200,
+      "expected_output_length": "medium"
+    },
+    {
+      "name": "Razonamiento - Problema Matemático",
+      "description": "Razonamiento matemático de múltiples pasos",
+      "prompt": "Un tren recorre 120 km en 2 horas. Si mantiene la misma velocidad, ¿qué distancia recorrerá en 5 horas? Muestra tus cálculos.",
+      "max_tokens": 150,
+      "expected_output_length": "medium"
+    },
+    {
+      "name": "Resumen - Texto Corto",
+      "description": "Resumir un pasaje corto",
+      "prompt": "Resume lo siguiente en una sola oración: El cambio climático se refiere a los cambios a largo plazo de las temperaturas y los patrones climáticos. Estos cambios pueden ser naturales, pero desde el siglo XIX, las actividades humanas han sido el principal motor del cambio climático, debido principalmente a la quema de combustibles fósiles, que produce gases que atrapan el calor.",
+      "max_tokens": 100,
+      "expected_output_length": "short"
+    },
+    {
+      "name": "Resumen - Contenido Técnico",
+      "description": "Resumir información técnica",
+      "prompt": "Resume los puntos clave del siguiente texto: El aprendizaje automático (machine learning) es un subconjunto de la inteligencia artificial que permite a los sistemas aprender y mejorar a partir de la experiencia sin ser programados explícitamente. Se centra en el desarrollo de programas informáticos que pueden acceder a datos y utilizarlos para aprender por sí mismos. El proceso comienza con observaciones o datos, como ejemplos, experiencia directa o instrucciones, para buscar patrones en los datos y tomar mejores decisiones en el futuro.",
+      "max_tokens": 150,
+      "expected_output_length": "medium"
+    },
+    {
+      "name": "Escritura Creativa",
+      "description": "Generar contenido creativo",
+      "prompt": "Escribe el inicio de una historia corta (2-3 oraciones) sobre un detective que descubre algo inusual.",
+      "max_tokens": 100,
+      "expected_output_length": "short"
+    },
+    {
+      "name": "Generación de Código",
+      "description": "Tarea simple de generación de código",
+      "prompt": "Escribe una función en Python que calcule el factorial de un número usando recursividad.",
+      "max_tokens": 150,
+      "expected_output_length": "medium"
+    },
+    {
+      "name": "Respuesta Larga",
+      "description": "Generación de respuesta extensa",
+      "prompt": "Explica el ciclo del agua en detalle, incluyendo todos los procesos principales como la evaporación, condensación, precipitación y recolección.",
+      "max_tokens": 300,
+      "expected_output_length": "long"
+    }
+  ],
+  "default_config": {
+    "iterations": 5,
+    "concurrency": 1,
+    "timeout": 30000,
+    "temperature": 0.7,
+    "streaming": true
+  }
+}

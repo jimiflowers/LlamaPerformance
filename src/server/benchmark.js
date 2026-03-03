@@ -85,6 +85,7 @@ class BenchmarkEngine {
       ttft: null,
       tokens: 0,
       interTokenDelays: [],
+      responseText: '',
       error: null,
       timeout: false
     };
@@ -131,6 +132,7 @@ class BenchmarkEngine {
             lastTokenTime = currentTokenTime;
           }
           metrics.tokens++;
+          metrics.responseText += text;
         }
       }
 
@@ -188,6 +190,7 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
       ttfts: [],
       tokenCounts: [],
       allInterTokenDelays: [],
+      responseTexts: [],
       errors: 0,
       timeouts: 0,
       resourceSnapshots: []
@@ -227,6 +230,11 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
         // Collect inter-token delays for TPOT calculation
         if (metrics.interTokenDelays.length > 0) {
           results.allInterTokenDelays.push(...metrics.interTokenDelays);
+        }
+
+        // Keep every successful response (last one used as representative sample)
+        if (metrics.responseText) {
+          results.responseTexts.push(metrics.responseText);
         }
       }
 
@@ -297,7 +305,13 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
 
     return {
       aggregated,
-      raw: results
+      raw: {
+        ...results,
+        // Representative response: last successful iteration
+        lastResponse: results.responseTexts.length > 0
+          ? results.responseTexts[results.responseTexts.length - 1]
+          : null
+      }
     };
   }
 
@@ -347,12 +361,13 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
         const ensureModelReady = async (modelId, model) => {
           // Try cache first
           let modelInfo = orchestrator.getLoadedModelInfo(modelId);
+          const loadParams = model.load_params || {};
 
           if (!modelInfo) {
             benchmarkLogger.warn('Model not loaded in cache, attempting to load', { modelId, alias: model.alias, model_id: model.model_id });
             try {
               // Use model_id first (contains device-specific variant)
-              modelInfo = await orchestrator.loadModel(modelId, model.model_id || model.alias);
+              modelInfo = await orchestrator.loadModel(modelId, model.model_id || model.alias, null, loadParams);
             } catch (err) {
               benchmarkLogger.error('Auto-load failed', { modelId, error: err.message });
               storage.saveLog('benchmark', runId, 'error', `Auto-load failed for ${model.model_id || model.alias}: ${err.message}`);
@@ -366,7 +381,7 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
             benchmarkLogger.warn('Model unhealthy, retrying load', { modelId, alias: modelInfo.alias, health });
             try {
               // Use model_id first (contains device-specific variant)
-              await orchestrator.loadModel(modelId, model.model_id || model.alias);
+              await orchestrator.loadModel(modelId, model.model_id || model.alias, null, loadParams);
               health = await orchestrator.checkModelHealth(modelInfo.alias || model.alias || model.model_id);
             } catch (err) {
               benchmarkLogger.error('Reload failed', { modelId, error: err.message });
@@ -381,36 +396,81 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
           return modelInfo;
         };
 
+        // Polls /v1/models until llama.cpp reports no active models (VRAM fully freed)
+        const waitForVramFree = async (maxWaitMs = 60000) => {
+          const deadline = Date.now() + maxWaitMs;
+          while (Date.now() < deadline) {
+            const health = await orchestrator.checkModelHealth('');
+            if (!health.healthy) {
+              benchmarkLogger.info('VRAM confirmed free — proceeding with next model load');
+              return true;
+            }
+            await new Promise(r => setTimeout(r, 1500));
+          }
+          benchmarkLogger.warn('Timed out waiting for VRAM to free — proceeding anyway');
+          return false;
+        };
+
         // Helper to update progress
+        let _currentModel = null;
+        let _currentModelIndex = 0;
         const updateProgress = () => {
           const progress = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
           this.runningBenchmarks.set(runId, {
             id: runId,
             status: 'running',
-            progress
+            progress,
+            currentModel: _currentModel,
+            currentModelIndex: _currentModelIndex,
+            totalModels: modelIds.length
           });
           if (progressCallback) {
             progressCallback({ runId, progress });
           }
         };
 
-        // Run benchmarks for each model
-        for (const modelId of modelIds) {
+        // Run benchmarks for each model sequentially
+        for (let i = 0; i < modelIds.length; i++) {
+          const modelId = modelIds[i];
+
+          // Unload previous model and wait for VRAM to be fully freed
+          if (i > 0) {
+            const prevId = modelIds[i - 1];
+            const prevModel = storage.getModel(prevId);
+            try {
+              benchmarkLogger.info(`Unloading model ${prevId} before loading next`);
+              await orchestrator.unloadModel(prevId, prevModel?.alias);
+            } catch (e) {
+              benchmarkLogger.warn(`Could not unload ${prevId}`, { error: e.message });
+            }
+            // Wait until llama.cpp confirms VRAM is free before loading the next model
+            await waitForVramFree();
+          }
+
           benchmarkLogger.info('Benchmarking model', { modelId });
 
           // Get model from storage to get alias
           const model = storage.getModel(modelId);
           if (!model) {
             benchmarkLogger.error('Model not found in storage', { modelId });
-            storage.saveLog('benchmark', runId, 'error', 
+            storage.saveLog('benchmark', runId, 'error',
               `Model ${modelId} not found in storage`
             );
+            completedTasks += suite.scenarios.length;
+            updateProgress();
             continue;
           }
+
+          // Update progress with current model info
+          _currentModel = model.alias || modelId;
+          _currentModelIndex = i + 1;
+          updateProgress();
 
           const modelInfo = await ensureModelReady(modelId, model);
           if (!modelInfo) {
             benchmarkLogger.error('Model not ready, skipping', { modelId, alias: model.alias });
+            completedTasks += suite.scenarios.length;
+            updateProgress();
             continue;
           }
 
@@ -420,12 +480,16 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
             endpoint: orchestrator.getEndpoint()
           });
 
+          // Brief settling pause — lets the model finish its internal initialization
+          // and prevents inflated TTFT on the first inference after a fresh load
+          await new Promise(r => setTimeout(r, 3000));
+
           // Run each scenario in the suite
           for (const scenario of suite.scenarios) {
             try {
               const result = await this.runScenario(
-                modelId, 
-                scenario, 
+                modelId,
+                scenario,
                 config,
                 progressCallback
               );
@@ -444,19 +508,32 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
               allResults.push(resultRecord);
 
             } catch (error) {
-              benchmarkLogger.error('Scenario failed', { 
-                modelId, 
+              benchmarkLogger.error('Scenario failed', {
+                modelId,
                 scenario: scenario.name,
-                error: error.message 
+                error: error.message
               });
-              
-              storage.saveLog('benchmark', runId, 'error', 
+
+              storage.saveLog('benchmark', runId, 'error',
                 `Scenario ${scenario.name} failed for ${modelId}: ${error.message}`
               );
             } finally {
               completedTasks += 1;
               updateProgress();
             }
+          }
+        }
+
+        // Unload the last model after all benchmarks complete (clean VRAM state)
+        if (modelIds.length > 0) {
+          const lastId = modelIds[modelIds.length - 1];
+          const lastModel = storage.getModel(lastId);
+          try {
+            benchmarkLogger.info(`Unloading last model ${lastId} after benchmark completion`);
+            await orchestrator.unloadModel(lastId, lastModel?.alias);
+            await waitForVramFree(10000);
+          } catch (e) {
+            benchmarkLogger.warn(`Could not unload last model ${lastId}`, { error: e.message });
           }
         }
 

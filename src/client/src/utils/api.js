@@ -20,7 +20,8 @@ export const modelsAPI = {
   load: (id) => api.post(`/models/${id}/load`),
   test: (id, data) => api.post(`/models/${id}/test`, data),
   health: (id) => api.get(`/models/${id}/health`),
-  logs: (id, limit = 100) => api.get(`/models/${id}/logs`, { params: { limit } })
+  logs: (id, limit = 100) => api.get(`/models/${id}/logs`, { params: { limit } }),
+  updateParams: (id, params) => api.put(`/models/${encodeURIComponent(id)}/params`, params)
 };
 
 // Benchmarks API

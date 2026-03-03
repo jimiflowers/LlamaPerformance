@@ -13,6 +13,13 @@ function Models() {
   const [modelInfo, setModelInfo] = useState(null);
   const [newModel, setNewModel] = useState({ alias: '', model_id: '' });
   const [conflictModal, setConflictModal] = useState(null); // { runningModel, targetId }
+  const [paramsModal, setParamsModal] = useState(null); // model object being edited
+  const [paramsForm, setParamsForm] = useState({
+    n_ctx: '', n_ctx_custom: '',
+    n_batch: '', n_batch_custom: '',
+    flash_attn: false,
+    cache_type_k: '', cache_type_v: ''
+  });
 
   // Memoize model filtering to avoid recalculation on every render
   const { catalogModels, customModels } = useMemo(() => {
@@ -163,6 +170,54 @@ function Models() {
     }
   };
 
+  const N_CTX_PRESETS  = ['4096', '8192', '16384', '24576', '32768'];
+  const N_BATCH_PRESETS = ['128', '256', '512', '1024'];
+  const CACHE_TYPES = ['q4_0', 'q8_0', 'fp16'];
+
+  const openParamsModal = (model) => {
+    const lp = model.load_params || {};
+    const resolvePreset = (val, presets) => {
+      if (!val) return '';
+      const s = String(val);
+      return presets.includes(s) ? s : 'custom';
+    };
+    setParamsForm({
+      n_ctx:        resolvePreset(lp.n_ctx,   N_CTX_PRESETS),
+      n_ctx_custom: N_CTX_PRESETS.includes(String(lp.n_ctx)) || !lp.n_ctx ? '' : String(lp.n_ctx),
+      n_batch:        resolvePreset(lp.n_batch, N_BATCH_PRESETS),
+      n_batch_custom: N_BATCH_PRESETS.includes(String(lp.n_batch)) || !lp.n_batch ? '' : String(lp.n_batch),
+      flash_attn:   !!lp.flash_attn,
+      cache_type_k: lp.cache_type_k || '',
+      cache_type_v: lp.cache_type_v || ''
+    });
+    setParamsModal(model);
+  };
+
+  const handleSaveParams = async () => {
+    const resolve = (sel, custom) => {
+      if (!sel) return null;
+      return sel === 'custom' ? (parseInt(custom, 10) || null) : parseInt(sel, 10);
+    };
+    const params = {
+      n_ctx:        resolve(paramsForm.n_ctx,   paramsForm.n_ctx_custom),
+      n_batch:      resolve(paramsForm.n_batch, paramsForm.n_batch_custom),
+      flash_attn:   paramsForm.flash_attn || null,
+      cache_type_k: paramsForm.cache_type_k || null,
+      cache_type_v: paramsForm.cache_type_v || null
+    };
+    // Remove null values so the endpoint treats them as "unset"
+    Object.keys(params).forEach(k => { if (!params[k]) delete params[k]; });
+    try {
+      await modelsAPI.updateParams(paramsModal.id, params);
+      setSuccess('Load parameters saved.');
+      setParamsModal(null);
+      loadModels();
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (err) {
+      setError(err.response?.data?.error || err.message);
+    }
+  };
+
   const getStatusBadge = (status) => {
     const badgeClass = {
       running: 'badge-success',
@@ -252,15 +307,23 @@ function Models() {
                         </button>
                       </>
                     ) : null}
-                    <button 
-                      className="btn btn-secondary" 
+                    <button
+                      className="btn btn-secondary"
                       onClick={() => handleViewLogs(model)}
                       title="View live status and benchmark history"
                     >
                       Info
                     </button>
-                    <button 
-                      className="btn btn-danger" 
+                    <button
+                      className="btn btn-secondary"
+                      onClick={() => openParamsModal(model)}
+                      title="Configure load parameters (n_ctx, flash_attn, KV cache…)"
+                      style={model.load_params ? { borderColor: '#3498db', color: '#3498db' } : {}}
+                    >
+                      Params{model.load_params ? ' *' : ''}
+                    </button>
+                    <button
+                      className="btn btn-danger"
                       onClick={() => handleDeleteModel(model.id)}
                       title="Delete model configuration"
                     >
@@ -488,6 +551,119 @@ function Models() {
             </div>
             <div style={{ marginTop: '1rem' }}>
               <button className="btn btn-secondary" onClick={() => setShowLogsModal(false)}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Load Params modal */}
+      {paramsModal && (
+        <div className="modal-overlay" onClick={() => setParamsModal(null)}>
+          <div className="modal" style={{ maxWidth: '480px' }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">Load parameters — {paramsModal.alias}</div>
+            <p style={{ marginBottom: '1.25rem', fontSize: '0.88rem', color: '#7f8c8d', lineHeight: 1.5 }}>
+              These parameters are sent to llama.cpp each time this model is loaded (manually or during a benchmark run).
+              Leave a field at <em>Server default</em> to let llama.cpp use its own startup value.
+            </p>
+
+            {/* n_ctx */}
+            <div className="form-group">
+              <label className="form-label">Context size (n_ctx)</label>
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                <select
+                  className="form-control"
+                  value={paramsForm.n_ctx}
+                  onChange={(e) => setParamsForm({ ...paramsForm, n_ctx: e.target.value, n_ctx_custom: '' })}
+                  style={{ flex: 1 }}
+                >
+                  <option value="">Server default</option>
+                  {N_CTX_PRESETS.map(v => <option key={v} value={v}>{(parseInt(v)/1024).toFixed(0)}k ({v})</option>)}
+                  <option value="custom">Custom…</option>
+                </select>
+                {paramsForm.n_ctx === 'custom' && (
+                  <input
+                    type="number"
+                    className="form-control"
+                    placeholder="tokens"
+                    value={paramsForm.n_ctx_custom}
+                    onChange={(e) => setParamsForm({ ...paramsForm, n_ctx_custom: e.target.value })}
+                    style={{ width: '110px' }}
+                    min="512"
+                  />
+                )}
+              </div>
+            </div>
+
+            {/* n_batch */}
+            <div className="form-group">
+              <label className="form-label">Batch size (n_batch)</label>
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                <select
+                  className="form-control"
+                  value={paramsForm.n_batch}
+                  onChange={(e) => setParamsForm({ ...paramsForm, n_batch: e.target.value, n_batch_custom: '' })}
+                  style={{ flex: 1 }}
+                >
+                  <option value="">Server default</option>
+                  {N_BATCH_PRESETS.map(v => <option key={v} value={v}>{v}</option>)}
+                  <option value="custom">Custom…</option>
+                </select>
+                {paramsForm.n_batch === 'custom' && (
+                  <input
+                    type="number"
+                    className="form-control"
+                    placeholder="tokens"
+                    value={paramsForm.n_batch_custom}
+                    onChange={(e) => setParamsForm({ ...paramsForm, n_batch_custom: e.target.value })}
+                    style={{ width: '110px' }}
+                    min="1"
+                  />
+                )}
+              </div>
+            </div>
+
+            {/* flash_attn */}
+            <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <input
+                type="checkbox"
+                id="flash_attn"
+                checked={paramsForm.flash_attn}
+                onChange={(e) => setParamsForm({ ...paramsForm, flash_attn: e.target.checked })}
+              />
+              <label htmlFor="flash_attn" className="form-label" style={{ marginBottom: 0, cursor: 'pointer' }}>
+                Flash Attention (flash_attn)
+              </label>
+            </div>
+
+            {/* cache_type_k */}
+            <div className="form-group">
+              <label className="form-label">KV cache type — K (cache_type_k)</label>
+              <select
+                className="form-control"
+                value={paramsForm.cache_type_k}
+                onChange={(e) => setParamsForm({ ...paramsForm, cache_type_k: e.target.value })}
+              >
+                <option value="">Server default</option>
+                {CACHE_TYPES.map(v => <option key={v} value={v}>{v}</option>)}
+              </select>
+            </div>
+
+            {/* cache_type_v */}
+            <div className="form-group">
+              <label className="form-label">KV cache type — V (cache_type_v)</label>
+              <select
+                className="form-control"
+                value={paramsForm.cache_type_v}
+                onChange={(e) => setParamsForm({ ...paramsForm, cache_type_v: e.target.value })}
+              >
+                <option value="">Server default</option>
+                {CACHE_TYPES.map(v => <option key={v} value={v}>{v}</option>)}
+              </select>
+            </div>
+
+            <div style={{ marginTop: '1.5rem', display: 'flex', gap: '0.5rem' }}>
+              <button className="btn btn-primary" onClick={handleSaveParams}>Save</button>
+              <button className="btn btn-secondary" onClick={() => setParamsModal(null)}>Cancel</button>
             </div>
           </div>
         </div>
