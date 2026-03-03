@@ -342,3 +342,69 @@ select.form-control {
   50% { opacity: 1; }
   100% { opacity: 0.7; }
 }
+
+/* ── Print / PDF export ─────────────────────────────────────────── */
+
+.print-only { display: none; }
+
+/* Landscape A4 gives ~257 mm of usable width — enough for 10-column tables */
+@page {
+  size: A4 landscape;
+  margin: 1.5cm 2cm;
+}
+
+@media print {
+  .no-print { display: none !important; }
+  .print-only { display: block !important; }
+
+  /* Hide chrome */
+  .sidebar { display: none !important; }
+  header.header { display: none !important; }
+
+  /* Layout: make the content area fill the full page */
+  .main-container { display: block !important; }
+  .content { padding: 0 !important; max-width: 100% !important; }
+
+  body { background: white !important; }
+
+  /* Cards: no shadows, keep borders, avoid page-breaks inside */
+  .card {
+    box-shadow: none !important;
+    border: 1px solid #ccc !important;
+    break-inside: avoid;
+    page-break-inside: avoid;
+    margin-bottom: 0.75rem !important;
+  }
+
+  /* ── Tables ────────────────────────────────────────────────────── */
+  /* Reset any inline min-width so tables never overflow the page margin */
+  .table {
+    width: 100% !important;
+    min-width: 0 !important;
+    table-layout: auto !important;
+    font-size: 0.7rem !important;
+  }
+
+  .table th, .table td {
+    border: 1px solid #ccc !important;
+    padding: 3px 6px !important;
+    word-break: break-word !important;
+    overflow-wrap: break-word !important;
+    white-space: normal !important;
+  }
+
+  /* Remove the horizontal-scroll wrapper so the table can use full page width */
+  .table-scroll-container {
+    overflow: visible !important;
+    width: 100% !important;
+  }
+
+  /* Response cells: always show full text on print */
+  .response-cell-text {
+    max-height: none !important;
+    overflow: visible !important;
+    display: block !important;
+    font-size: 0.68rem !important;
+  }
+  .response-cell-toggle { display: none !important; }
+}

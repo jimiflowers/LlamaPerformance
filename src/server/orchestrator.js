@@ -62,7 +62,7 @@ class LlamaOrchestrator {
 /**
    * CARGA: Solo marca como RUNNING si recibe success: true
    */
-  async loadModel(modelId, alias, mmproj = null) {
+  async loadModel(modelId, alias, mmproj = null, loadParams = {}) {
     await this.initialize();
 
     // llama.cpp espera el nombre sin extensión (igual que en las llamadas curl directas)
@@ -74,6 +74,16 @@ class LlamaOrchestrator {
       if (mmproj) {
         body.mmproj = `${this.modelsDir}/${mmproj}`;
         logger.info(`>>> CARGA VL: incluyendo mmproj: ${body.mmproj}`);
+      }
+
+      // Parámetros de carga opcionales definidos por el usuario
+      if (loadParams.n_ctx)        body.n_ctx        = Number(loadParams.n_ctx);
+      if (loadParams.n_batch)      body.n_batch      = Number(loadParams.n_batch);
+      if (loadParams.flash_attn)   body.flash_attn   = true;
+      if (loadParams.cache_type_k) body.cache_type_k = loadParams.cache_type_k;
+      if (loadParams.cache_type_v) body.cache_type_v = loadParams.cache_type_v;
+      if (Object.values(loadParams).some(v => v)) {
+        logger.info(`>>> Parámetros de carga personalizados aplicados: n_ctx=${body.n_ctx ?? '—'} n_batch=${body.n_batch ?? '—'} flash_attn=${body.flash_attn ?? false} kv=${body.cache_type_k ?? '—'}/${body.cache_type_v ?? '—'}`);
       }
 
       logger.info(`>>> SOLICITANDO CARGA AL ROUTER: ${modelName}`);

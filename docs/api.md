@@ -50,10 +50,35 @@ Remove a model from the database.
 ### POST /models/:id/start
 Send a load request to the llama.cpp server (`POST /models/load`).
 For vision models the `mmproj` path is automatically included.
+Any load parameters previously saved via `PUT /models/:id/params` are forwarded automatically.
 
 ```json
 { "success": true }
 ```
+
+### PUT /models/:id/params
+Save per-model load parameters. These are persisted in storage and forwarded to llama.cpp on every subsequent load of this model (manual or benchmark-triggered).
+
+**Body** (all fields optional — omit or set to `null`/`false` to revert to server default):
+```json
+{
+  "n_ctx":        8192,
+  "n_batch":      512,
+  "flash_attn":   true,
+  "cache_type_k": "q8_0",
+  "cache_type_v": "q8_0"
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `n_ctx` | integer | Context window size in tokens |
+| `n_batch` | integer | Prompt processing batch size |
+| `flash_attn` | boolean | Enable Flash Attention (`true` only — omit to disable) |
+| `cache_type_k` | string | KV-cache quantisation for K matrix: `q4_0`, `q8_0`, `fp16` |
+| `cache_type_v` | string | KV-cache quantisation for V matrix: `q4_0`, `q8_0`, `fp16` |
+
+**Response:** `{ "success": true, "load_params": { ... } }`
 
 ### POST /models/:id/stop
 Send an unload request to the llama.cpp server (`POST /models/unload`).
@@ -130,13 +155,14 @@ List available benchmark suites from `benchmarks/suites/`.
 ```
 
 ### POST /benchmarks/run
-Start an async benchmark run. Returns immediately; poll `/benchmarks/runs` for status.
+Start an async benchmark run. Returns immediately; poll `/benchmarks/runs/:id/status` for progress.
 
 **Body:**
 ```json
 {
-  "modelIds": ["model_abc123"],
+  "modelIds": ["model_abc123", "model_def456"],
   "suiteName": "default",
+  "selectedScenarios": ["Simple Q&A - Short", "Code Generation"],
   "config": {
     "iterations": 5,
     "concurrency": 1,
@@ -147,7 +173,17 @@ Start an async benchmark run. Returns immediately; poll `/benchmarks/runs` for s
 }
 ```
 
-**Response:** `{ "success": true, "runId": "run_xyz", "message": "Benchmark started" }`
+- `modelIds` — any model IDs from the database, regardless of `status`. Stopped models will be loaded automatically before their tests begin.
+- `selectedScenarios` — optional; if omitted, all scenarios in the suite are run.
+
+**Execution order for each model:**
+1. Unload the previous model (if any) and wait until `/v1/models` returns empty (≤ 60 s)
+2. Load the current model via `POST /models/load`
+3. Wait 3 seconds for the model to settle before the first inference
+4. Run all selected scenarios
+5. After the last model finishes, unload it too (wait ≤ 10 s for VRAM to free)
+
+**Response:** `{ "success": true, "runId": "run_xyz", "message": "Benchmark iniciado en segundo plano" }`
 
 ### GET /benchmarks/runs
 List all benchmark runs, enriched with `model_aliases`.
@@ -188,11 +224,34 @@ Get a specific run with its results.
       "error_rate": 0,
       "cpu_avg": 35.2,
       "ram_avg": 42.1,
-      "gpu_avg": 68.5
+      "gpu_avg": 68.5,
+      "lastResponse": "Hello! How can I assist you today?..."
     }
   ]
 }
 ```
+
+`lastResponse` — the text of the last successful inference response recorded for that scenario. `null` if all iterations failed or the run pre-dates response storage. Extracted from the `raw_data` blob; `raw_data` itself is not returned.
+
+### GET /benchmarks/runs/:id/status
+Poll status of an in-progress benchmark run.
+
+```json
+{
+  "id": "run_xyz",
+  "status": "running",
+  "progress": 42,
+  "currentModel": "Gemma 3 12B Instruct Q5 K M (Text)",
+  "currentModelIndex": 2,
+  "totalModels": 3
+}
+```
+
+- `progress` — 0–100 percentage of completed scenario×iteration tasks
+- `currentModel` — alias of the model currently under test (only while `status === "running"`)
+- `currentModelIndex` / `totalModels` — position in the sequential queue
+
+When `status` is `"completed"` or `"failed"` the record is also available from `GET /benchmarks/runs/:id`.
 
 ### DELETE /benchmarks/runs/:id
 Permanently delete a benchmark run and all associated results and logs.

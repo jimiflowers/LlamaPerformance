@@ -23,6 +23,9 @@ function Benchmarks() {
   const [currentRunId, setCurrentRunId] = useState(null);
   const [runStatus, setRunStatus] = useState(null);
   const [runProgress, setRunProgress] = useState(0);
+  const [runCurrentModel, setRunCurrentModel] = useState(null);
+  const [runModelIndex, setRunModelIndex] = useState(null);
+  const [runTotalModels, setRunTotalModels] = useState(null);
 
   useEffect(() => {
     loadModels();
@@ -46,9 +49,10 @@ function Benchmarks() {
       try {
         const res = await benchmarksAPI.status(currentRunId);
         setRunStatus(res.data.status);
-        if (res.data.progress !== null && res.data.progress !== undefined) {
-          setRunProgress(res.data.progress);
-        }
+        if (res.data.progress != null) setRunProgress(res.data.progress);
+        if (res.data.currentModel != null) setRunCurrentModel(res.data.currentModel);
+        if (res.data.currentModelIndex != null) setRunModelIndex(res.data.currentModelIndex);
+        if (res.data.totalModels != null) setRunTotalModels(res.data.totalModels);
 
         // Stop polling when not running
         if (res.data.status !== 'running') {
@@ -72,7 +76,7 @@ function Benchmarks() {
     try {
       const res = await modelsAPI.getAll();
       const list = Array.isArray(res.data) ? res.data : (res.data.models || []);
-      setModels(list.filter(m => m.status === 'running'));
+      setModels(list);
     } catch (err) {
       setError(err.response?.data?.error || err.message);
     } finally {
@@ -220,7 +224,17 @@ function Benchmarks() {
           <div className="spinner" aria-label="Benchmark running" />
           <div style={{ flex: 1 }}>
             <h4 style={{ marginBottom: '0.5rem' }}>Benchmark running...</h4>
-            <p style={{ marginBottom: '0.5rem', color: '#7f8c8d' }}>Run ID: <code>{currentRunId}</code></p>
+            {runCurrentModel && (
+              <p style={{ marginBottom: '0.5rem', color: '#2c3e50' }}>
+                Testing <strong>{runCurrentModel}</strong>
+                {runModelIndex && runTotalModels && (
+                  <span style={{ color: '#7f8c8d', marginLeft: '0.5rem' }}>
+                    ({runModelIndex} of {runTotalModels})
+                  </span>
+                )}
+              </p>
+            )}
+            <p style={{ marginBottom: '0.5rem', color: '#7f8c8d', fontSize: '0.85rem' }}>Run ID: <code>{currentRunId}</code></p>
             <div className="progress-bar-container">
               <div className="progress-bar-fill" style={{ width: `${runProgress || 5}%` }} />
             </div>
@@ -347,12 +361,6 @@ function Benchmarks() {
         </div>
       )}
 
-      {!modelsLoading && models.length === 0 && (
-        <div className="error">
-          No running models available. Please start at least one model service in the Models tab before running benchmarks.
-        </div>
-      )}
-
       <form onSubmit={handleRunBenchmark}>
         <div className="card">
           <div className="card-header">Select Benchmark Suite</div>
@@ -462,27 +470,43 @@ function Benchmarks() {
 
         <div className="card">
           <div className="card-header">Select Models</div>
-          <p style={{ marginBottom: '1rem', color: '#7f8c8d' }}>
-            Select one or more models to benchmark (only running services are shown):
+          <p style={{ marginBottom: '0.75rem', color: '#7f8c8d', fontSize: '0.9rem' }}>
+            Models are tested <strong>one at a time</strong> — each will be loaded, benchmarked, then
+            unloaded before the next begins. Currently loaded models are shown in green.
           </p>
           {!modelsLoading && models.length === 0 ? (
-            <p style={{ color: '#e74c3c' }}>No running models available</p>
+            <p style={{ color: '#e74c3c' }}>No models configured. Add models in the Models tab first.</p>
           ) : (
             <div>
-              {models.map(model => (
-                <div key={model.id} style={{ marginBottom: '0.75rem', display: 'flex', alignItems: 'center' }}>
-                  <input
-                    type="checkbox"
-                    id={`model-${model.id}`}
-                    checked={selectedModels.includes(model.id)}
-                    onChange={() => handleModelToggle(model.id)}
-                    style={{ marginRight: '0.5rem', width: '18px', height: '18px' }}
-                  />
-                  <label htmlFor={`model-${model.id}`} style={{ cursor: 'pointer' }}>
-                    <strong>{model.alias}</strong> ({model.model_id}) - {model.endpoint}
-                  </label>
-                </div>
-              ))}
+              {models.map(model => {
+                const isRunning = model.status === 'running';
+                return (
+                  <div key={model.id} style={{ marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <input
+                      type="checkbox"
+                      id={`model-${model.id}`}
+                      checked={selectedModels.includes(model.id)}
+                      onChange={() => handleModelToggle(model.id)}
+                      style={{ width: '18px', height: '18px', flexShrink: 0 }}
+                    />
+                    <label htmlFor={`model-${model.id}`} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1 }}>
+                      <span style={{
+                        padding: '1px 7px',
+                        borderRadius: '10px',
+                        fontSize: '0.72rem',
+                        fontWeight: 'bold',
+                        background: isRunning ? '#d4edda' : '#e9ecef',
+                        color: isRunning ? '#155724' : '#6c757d',
+                        flexShrink: 0
+                      }}>
+                        {isRunning ? 'running' : 'stopped'}
+                      </span>
+                      <strong>{model.alias}</strong>
+                      <span style={{ color: '#7f8c8d', fontSize: '0.85rem' }}>({model.model_id})</span>
+                    </label>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
@@ -561,7 +585,7 @@ function Benchmarks() {
           <button 
             type="submit" 
             className="btn btn-success" 
-            disabled={loading || models.length === 0 || selectedModels.length === 0}
+            disabled={loading || selectedModels.length === 0}
           >
             {loading ? 'Starting Benchmark...' : 'Run Benchmark'}
           </button>
