@@ -698,7 +698,7 @@ function Results() {
                     <p style={{ padding: '0.5rem 1rem 0', color: '#7f8c8d', fontSize: '0.85rem' }}>
                       Last response recorded per scenario. Click a cell to expand/collapse.
                     </p>
-                    <div style={{ overflowX: 'auto' }}>
+                    <div className="table-scroll-container" style={{ overflowX: 'auto' }}>
                       <table className="table" style={{ tableLayout: 'fixed', minWidth: `${200 + models.length * 260}px` }}>
                         <colgroup>
                           <col style={{ width: '200px' }} />
