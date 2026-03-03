@@ -381,6 +381,21 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
           return modelInfo;
         };
 
+        // Polls /v1/models until llama.cpp reports no active models (VRAM fully freed)
+        const waitForVramFree = async (maxWaitMs = 60000) => {
+          const deadline = Date.now() + maxWaitMs;
+          while (Date.now() < deadline) {
+            const health = await orchestrator.checkModelHealth('');
+            if (!health.healthy) {
+              benchmarkLogger.info('VRAM confirmed free — proceeding with next model load');
+              return true;
+            }
+            await new Promise(r => setTimeout(r, 1500));
+          }
+          benchmarkLogger.warn('Timed out waiting for VRAM to free — proceeding anyway');
+          return false;
+        };
+
         // Helper to update progress
         let _currentModel = null;
         let _currentModelIndex = 0;
@@ -403,7 +418,7 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
         for (let i = 0; i < modelIds.length; i++) {
           const modelId = modelIds[i];
 
-          // Unload previous model before loading next one
+          // Unload previous model and wait for VRAM to be fully freed
           if (i > 0) {
             const prevId = modelIds[i - 1];
             const prevModel = storage.getModel(prevId);
@@ -413,6 +428,8 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
             } catch (e) {
               benchmarkLogger.warn(`Could not unload ${prevId}`, { error: e.message });
             }
+            // Wait until llama.cpp confirms VRAM is free before loading the next model
+            await waitForVramFree();
           }
 
           benchmarkLogger.info('Benchmarking model', { modelId });
@@ -447,6 +464,10 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
             alias: modelInfo.alias,
             endpoint: orchestrator.getEndpoint()
           });
+
+          // Brief settling pause — lets the model finish its internal initialization
+          // and prevents inflated TTFT on the first inference after a fresh load
+          await new Promise(r => setTimeout(r, 3000));
 
           // Run each scenario in the suite
           for (const scenario of suite.scenarios) {
@@ -495,6 +516,7 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
           try {
             benchmarkLogger.info(`Unloading last model ${lastId} after benchmark completion`);
             await orchestrator.unloadModel(lastId, lastModel?.alias);
+            await waitForVramFree(30000);
           } catch (e) {
             benchmarkLogger.warn(`Could not unload last model ${lastId}`, { error: e.message });
           }
