@@ -382,35 +382,63 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
         };
 
         // Helper to update progress
+        let _currentModel = null;
+        let _currentModelIndex = 0;
         const updateProgress = () => {
           const progress = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
           this.runningBenchmarks.set(runId, {
             id: runId,
             status: 'running',
-            progress
+            progress,
+            currentModel: _currentModel,
+            currentModelIndex: _currentModelIndex,
+            totalModels: modelIds.length
           });
           if (progressCallback) {
             progressCallback({ runId, progress });
           }
         };
 
-        // Run benchmarks for each model
-        for (const modelId of modelIds) {
+        // Run benchmarks for each model sequentially
+        for (let i = 0; i < modelIds.length; i++) {
+          const modelId = modelIds[i];
+
+          // Unload previous model before loading next one
+          if (i > 0) {
+            const prevId = modelIds[i - 1];
+            const prevModel = storage.getModel(prevId);
+            try {
+              benchmarkLogger.info(`Unloading model ${prevId} before loading next`);
+              await orchestrator.unloadModel(prevId, prevModel?.alias);
+            } catch (e) {
+              benchmarkLogger.warn(`Could not unload ${prevId}`, { error: e.message });
+            }
+          }
+
           benchmarkLogger.info('Benchmarking model', { modelId });
 
           // Get model from storage to get alias
           const model = storage.getModel(modelId);
           if (!model) {
             benchmarkLogger.error('Model not found in storage', { modelId });
-            storage.saveLog('benchmark', runId, 'error', 
+            storage.saveLog('benchmark', runId, 'error',
               `Model ${modelId} not found in storage`
             );
+            completedTasks += suite.scenarios.length;
+            updateProgress();
             continue;
           }
+
+          // Update progress with current model info
+          _currentModel = model.alias || modelId;
+          _currentModelIndex = i + 1;
+          updateProgress();
 
           const modelInfo = await ensureModelReady(modelId, model);
           if (!modelInfo) {
             benchmarkLogger.error('Model not ready, skipping', { modelId, alias: model.alias });
+            completedTasks += suite.scenarios.length;
+            updateProgress();
             continue;
           }
 
@@ -424,8 +452,8 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
           for (const scenario of suite.scenarios) {
             try {
               const result = await this.runScenario(
-                modelId, 
-                scenario, 
+                modelId,
+                scenario,
                 config,
                 progressCallback
               );
@@ -444,19 +472,31 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
               allResults.push(resultRecord);
 
             } catch (error) {
-              benchmarkLogger.error('Scenario failed', { 
-                modelId, 
+              benchmarkLogger.error('Scenario failed', {
+                modelId,
                 scenario: scenario.name,
-                error: error.message 
+                error: error.message
               });
-              
-              storage.saveLog('benchmark', runId, 'error', 
+
+              storage.saveLog('benchmark', runId, 'error',
                 `Scenario ${scenario.name} failed for ${modelId}: ${error.message}`
               );
             } finally {
               completedTasks += 1;
               updateProgress();
             }
+          }
+        }
+
+        // Unload the last model after all benchmarks complete (clean VRAM state)
+        if (modelIds.length > 0) {
+          const lastId = modelIds[modelIds.length - 1];
+          const lastModel = storage.getModel(lastId);
+          try {
+            benchmarkLogger.info(`Unloading last model ${lastId} after benchmark completion`);
+            await orchestrator.unloadModel(lastId, lastModel?.alias);
+          } catch (e) {
+            benchmarkLogger.warn(`Could not unload last model ${lastId}`, { error: e.message });
           }
         }
 
