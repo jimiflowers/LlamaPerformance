@@ -48,7 +48,7 @@ Add a model to the database.
 Remove a model from the database.
 
 ### POST /models/:id/start
-Load the model into llama-swap (sends `/models/load` to the remote server).
+Send a load request to the llama.cpp server (`POST /models/load`).
 For vision models the `mmproj` path is automatically included.
 
 ```json
@@ -56,7 +56,7 @@ For vision models the `mmproj` path is automatically included.
 ```
 
 ### POST /models/:id/stop
-Unload the model from llama-swap.
+Send an unload request to the llama.cpp server (`POST /models/unload`).
 
 ### POST /models/:id/test
 Run a single inference request to verify the model responds.

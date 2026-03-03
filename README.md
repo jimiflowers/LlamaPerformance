@@ -1,6 +1,6 @@
 # LlamaPerformance
 
-> **Fork** of [leestott/FLPerformance](https://github.com/leestott/FLPerformance), adapted to benchmark GGUF models served by a remote **llama.cpp** or **llama-swap** server instead of Microsoft Foundry Local.
+> **Fork** of [leestott/FLPerformance](https://github.com/leestott/FLPerformance), adapted to benchmark GGUF models served by a remote **llama.cpp** or **llama.cpp** server instead of Microsoft Foundry Local.
 
 A full-stack web application for measuring and comparing the inference performance of multiple LLMs running on a GPU server.
 
@@ -23,7 +23,7 @@ The original FLPerformance was built around Microsoft Foundry Local (Windows, ON
 
 ## Features
 
-- **Model management**: Load and unload GGUF models via the llama-swap router
+- **Model management**: Load and unload GGUF models via the llama.cpp router
 - **Benchmark engine**: Runs standardised prompt suites and collects:
   - TTFT (time to first token)
   - TPOT (time per output token)
@@ -45,7 +45,7 @@ The original FLPerformance was built around Microsoft Foundry Local (Windows, ON
 | Component | Notes |
 |-----------|-------|
 | Node.js ≥ 18 | Backend and Vite dev server |
-| llama-swap or llama.cpp | Running on a GPU machine, accessible by HTTP |
+| llama.cpp or llama.cpp | Running on a GPU machine, accessible by HTTP |
 | SSH access to GPU machine | Only needed for the model discovery scan |
 
 The application does **not** need to run on the GPU machine itself. The backend can run on any Linux host that has network access to the llama.cpp server.
@@ -105,7 +105,7 @@ npm run server   # serves the built UI from the Express server on port 3001
 3. Go to **Settings → Connection Settings**:
 
    **Option A — Remote server (default)**
-   - Set **Llama API URL** to the address of your llama.cpp / llama-swap server (e.g. `http://gpu-host.lan:8000`)
+   - Set **Llama API URL** to the address of your llama.cpp / llama.cpp server (e.g. `http://gpu-host.lan:8000`)
    - Adjust **Server Port** if needed (restart required to take effect)
    - Choose **Log Level**
    - Click **Save Connection Settings**
@@ -138,7 +138,7 @@ npm run server   # serves the built UI from the Express server on port 3001
 ### Models tab
 
 - Lists all models from `models.json`
-- **Load**: sends a load request to llama-swap for that model
+- **Load**: sends a load request to llama.cpp for that model
 - **Stop**: unloads the model
 - **Test**: runs a single inference request to verify the model responds
 
@@ -201,7 +201,7 @@ All settings are stored in `settings.json` at the project root and are editable 
 
 | Setting | Env fallback | Description |
 |---------|-------------|-------------|
-| `llamaApiUrl` | `LLAMA_API_URL` | URL of the llama.cpp / llama-swap server |
+| `llamaApiUrl` | `LLAMA_API_URL` | URL of the llama.cpp / llama.cpp server |
 | `port` | `PORT` | Backend Express port (restart required) |
 | `logLevel` | `LOG_LEVEL` | Winston log level — applied immediately |
 | `modelsDir` | `MODELS_DIR` | Remote directory scanned for `.gguf` files |
@@ -229,7 +229,7 @@ All settings are stored in `settings.json` at the project root and are editable 
 ]
 ```
 
-- `id` — filename of the `.gguf` file as known to llama-swap (path excluded, extension included)
+- `id` — filename of the `.gguf` file as known to llama.cpp (path excluded, extension included)
 - `alias` — display name shown in the UI
 - `mmproj` — (optional) mmproj filename for vision-language models
 
@@ -241,7 +241,7 @@ The Settings → SSH scan automatically detects mmproj files and assigns them to
 
 ### Cannot connect to the llama.cpp server
 - Verify the URL in **Settings → Connection Settings**
-- Confirm the llama.cpp / llama-swap process is running: `curl http://<host>:8000/health`
+- Confirm the llama.cpp / llama.cpp process is running: `curl http://<host>:8000/health`
 
 ### SSH scan fails
 - Verify SSH username and port are correct in Settings
@@ -249,7 +249,7 @@ The Settings → SSH scan automatically detects mmproj files and assigns them to
 - Test manually: `ssh -p <port> <user>@<host> ls /path/to/models`
 
 ### Model fails to load
-- The `id` in `models.json` must match exactly what llama-swap expects (no path prefix)
+- The `id` in `models.json` must match exactly what llama.cpp expects (no path prefix)
 - For VL models, verify the `mmproj` filename is correct and that `modelsDir` in Settings points to the directory containing both files
 
 ### Benchmark timeouts

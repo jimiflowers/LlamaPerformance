@@ -195,7 +195,7 @@ function Settings() {
               max={65535}
             />
             <small style={{ color: '#7f8c8d' }}>
-              Port where llama.cpp / llama-swap is listening on this machine
+              Port where llama.cpp is listening on this machine
             </small>
           </div>
         ) : (
@@ -209,7 +209,7 @@ function Settings() {
               placeholder="http://gpu-host.lan:8000"
             />
             <small style={{ color: '#7f8c8d' }}>
-              Host and port of the remote llama-swap / llama.cpp server
+              Host and port of the remote llama.cpp server
             </small>
           </div>
         )}

@@ -65,49 +65,53 @@ class LlamaOrchestrator {
   async loadModel(modelId, alias, mmproj = null) {
     await this.initialize();
 
-    const cleanId = modelId.replace(/\.gguf$/i, '');
+    // llama.cpp espera el nombre sin extensión (igual que en las llamadas curl directas)
+    const modelName = modelId.replace(/\.gguf$/i, '');
 
     try {
-      const body = { model: cleanId, n_gpu_layers: -1 };
+      const body = { model: modelName, n_gpu_layers: -1 };
 
       if (mmproj) {
-        // Construimos el path completo del mmproj para llama-swap
         body.mmproj = `${this.modelsDir}/${mmproj}`;
         logger.info(`>>> CARGA VL: incluyendo mmproj: ${body.mmproj}`);
       }
 
-      logger.info(`>>> SOLICITANDO CARGA AL ROUTER (CURL STYLE): ${cleanId}`);
+      logger.info(`>>> SOLICITANDO CARGA AL ROUTER: ${modelName}`);
 
       const response = await axios.post(`${this.llamaHost}/models/load`, body, {
         timeout: 300000,
         headers: { "Content-Type": "application/json" }
       });
 
-      // 2. Solo si hay success: true actualizamos el estado
       if (response.data && response.data.success === true) {
         logger.info(`>>> CONFIRMACIÓN RECIBIDA: [SUCCESS: TRUE]`);
-        
+
         this.loadedModels.clear();
         this.loadedModels.set(modelId, { id: modelId, alias: alias });
-        
-        // 3. Persistencia en SQLite (Incluyendo model_id para evitar el error de restricción)
-        storage.saveModel({ 
-          id: modelId,            // El ID original para el Frontend
-          model_id: modelId,      // <--- SOLUCIONA: NOT NULL constraint failed
-          alias: alias || cleanId,
-          status: 'running', 
-          updated_at: Date.now() 
+
+        storage.saveModel({
+          id: modelId,
+          model_id: modelId,
+          alias: alias || modelName,
+          status: 'running',
+          updated_at: Date.now()
         });
 
         return { id: modelId, alias, status: 'running' };
       } else {
         logger.error(`>>> RECHAZO DEL SERVIDOR:`, response.data);
-        throw new Error(`Llama.cpp devolvió success: false`);
+        throw new Error(`El servidor llama.cpp devolvió success: false`);
       }
     } catch (error) {
-      logger.error('Error en proceso de carga', { 
+      // Error 404: el servidor llama.cpp no reconoce ese nombre de modelo
+      if (error.response?.status === 404) {
+        const msg = `Model "${modelName}" not found in the llama.cpp server. Make sure the model is configured and the name matches exactly (without .gguf extension).`;
+        logger.error(msg);
+        throw new Error(msg);
+      }
+      logger.error('Error en proceso de carga', {
         msg: error.message,
-        details: error.response?.data 
+        details: error.response?.data
       });
       throw error;
     }
@@ -118,19 +122,18 @@ class LlamaOrchestrator {
    */
   async unloadModel(modelId, alias) {
     await this.initialize();
-    
-    // Normalizamos el ID (Igual que en el curl que te funcionó)
-    const cleanId = modelId.replace('.gguf', '');
-    
+
+    const modelName = modelId.replace(/\.gguf$/i, '');
+
     try {
-      logger.info(`>>> SOLICITANDO DESCARGA: ${cleanId}`);
+      logger.info(`>>> SOLICITANDO DESCARGA: ${modelName}`);
 
       const response = await axios.post(`${this.llamaHost}/models/unload`, {
-        model: cleanId // <--- Ahora sí coincide con tu curl exitoso
+        model: modelName
       });
 
       if (response.data && response.data.success === true) {
-        logger.info(`>>> CONFIRMACIÓN RECIBIDA: [SUCCESS: TRUE] - VRAM liberada para ${cleanId}`);
+        logger.info(`>>> CONFIRMACIÓN RECIBIDA: [SUCCESS: TRUE] - VRAM liberada para ${modelName}`);
         
         this.loadedModels.delete(modelId);
         
@@ -140,7 +143,7 @@ class LlamaOrchestrator {
         }
         return { success: true, status: 'stopped' };
       } else {
-        logger.warn(`>>> AVISO: El servidor no encontró el modelo ${cleanId} para descargar`);
+        logger.warn(`>>> AVISO: El servidor no encontró el modelo ${modelName} para descargar`);
         return { success: false };
       }
     } catch (error) {

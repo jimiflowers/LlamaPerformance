@@ -4,7 +4,7 @@
 
 Before running a benchmark, verify:
 
-- [ ] **llama.cpp / llama-swap is running** on your GPU server and reachable
+- [ ] **llama.cpp / llama.cpp is running** on your GPU server and reachable
 - [ ] **Settings configured**: Llama API URL saved in the Settings tab
 - [ ] **models.json populated**: at least one model via SSH scan, or manually edited
 - [ ] **Backend is running**: terminal shows `LlamaPerformance server ready on port 3001`
@@ -16,7 +16,7 @@ Before running a benchmark, verify:
 
 1. Go to **Models** tab
 2. Find a model in the list (from `models.json`)
-3. Click **Load** — llama-swap will load the GGUF file into VRAM
+3. Click **Load** — llama.cpp will load the GGUF file into VRAM
 4. Wait for status to change to **running** (can take 10–60 seconds depending on model size)
 5. Click **Test** to confirm inference works before benchmarking
 
@@ -84,7 +84,7 @@ Select all 9 scenarios. Expected time: 15–30 minutes.
 - Run 1 scenario / 1 iteration first to find a safe baseline
 
 ### Model won't load
-- Verify the `id` in `models.json` matches exactly what llama-swap expects (no path prefix)
+- Verify the `id` in `models.json` matches exactly what llama.cpp expects (no path prefix)
 - For VL models, confirm `mmproj` filename is correct and `modelsDir` in Settings is set
 
 ### TPS = 0
