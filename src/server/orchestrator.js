@@ -86,6 +86,15 @@ class LlamaOrchestrator {
       if (response.data && response.data.success === true) {
         logger.info(`>>> CONFIRMACIÓN RECIBIDA: [SUCCESS: TRUE]`);
 
+        // Marcar todos los demás modelos running como stopped (llama.cpp solo admite uno a la vez)
+        const allModels = storage.getAllModels();
+        for (const m of allModels) {
+          if (m.status === 'running' && m.id !== modelId) {
+            storage.saveModel({ ...m, status: 'stopped', updated_at: Date.now() });
+            logger.info(`>>> Modelo anterior marcado como stopped: ${m.id}`);
+          }
+        }
+
         this.loadedModels.clear();
         this.loadedModels.set(modelId, { id: modelId, alias: alias });
 
