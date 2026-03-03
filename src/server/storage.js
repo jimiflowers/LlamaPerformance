@@ -87,6 +87,10 @@ class Storage {
       )
     `);
 
+    // Migración: load_params en tabla models
+    try { this.db.exec(`ALTER TABLE models ADD COLUMN load_params TEXT`); }
+    catch (e) { /* ya existe */ }
+
     // Migración: añade columnas nuevas a bases de datos existentes
     const newColumns = [
       'tpot REAL', 'gen_tps REAL', 'latency_p50 REAL', 'latency_p95 REAL',
@@ -116,30 +120,40 @@ class Storage {
  /**
    * Guarda o actualiza el estado del modelo, incluyendo telemetría de GPU
    */
+  _parseModel(m) {
+    if (!m || typeof m.load_params !== 'string') return m;
+    try { m.load_params = JSON.parse(m.load_params); } catch { m.load_params = null; }
+    return m;
+  }
+
   saveModel(model) {
     const now = Date.now();
     const vram = model.vram_usage || 0;
     const unit = model.compute_unit || 'Unknown';
+    const loadParamsJson = model.load_params
+      ? JSON.stringify(model.load_params)
+      : null;
 
     if (this.useJson) {
-      this.data.models[model.id] = { 
-        ...model, 
+      this.data.models[model.id] = {
+        ...model,
         vram_usage: vram,
         compute_unit: unit,
-        created_at: now 
+        created_at: now
       };
       this.saveJsonData();
     } else {
       this.db.prepare(`
-        INSERT OR REPLACE INTO models (id, alias, model_id, status, vram_usage, compute_unit, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT OR REPLACE INTO models (id, alias, model_id, status, vram_usage, compute_unit, load_params, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
-        model.id, 
-        model.alias, 
-        model.model_id, 
-        model.status || 'stopped', 
+        model.id,
+        model.alias,
+        model.model_id,
+        model.status || 'stopped',
         vram,
         unit,
+        loadParamsJson,
         now
       );
     }
@@ -148,12 +162,12 @@ class Storage {
 
   getAllModels() {
     if (this.useJson) return Object.values(this.data.models).sort((a, b) => b.created_at - a.created_at);
-    return this.db.prepare('SELECT * FROM models ORDER BY created_at DESC').all();
+    return this.db.prepare('SELECT * FROM models ORDER BY created_at DESC').all().map(m => this._parseModel(m));
   }
 
   getModel(id) {
     if (this.useJson) return this.data.models[id] || null;
-    return this.db.prepare('SELECT * FROM models WHERE id = ?').get(id);
+    return this._parseModel(this.db.prepare('SELECT * FROM models WHERE id = ?').get(id));
   }
 
   deleteModel(id) {

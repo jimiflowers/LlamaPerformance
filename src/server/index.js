@@ -118,7 +118,8 @@ app.post('/api/models/:id/start', async (req, res) => {
     const inventoryEntry = inventory.find(m => m.id === id);
     const mmproj = inventoryEntry?.mmproj || null;
 
-    const modelInfo = await orchestrator.loadModel(id, model.model_id || model.alias, mmproj);
+    const loadParams = model.load_params || {};
+    const modelInfo = await orchestrator.loadModel(id, model.model_id || model.alias, mmproj, loadParams);
 
     res.json({
       success: true,
@@ -345,6 +346,32 @@ app.delete('/api/models/:id(*)', async (req, res) => {
     storage.deleteModel(id);
     logger.info('Modelo eliminado de la configuración', { id });
     res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * PUT /api/models/:id/params
+ * Guarda los parámetros de carga personalizados (n_ctx, n_batch, flash_attn, cache_type_k/v)
+ */
+app.put('/api/models/:id(*)/params', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const model = storage.getModel(id);
+    if (!model) return res.status(404).json({ error: 'Modelo no encontrado' });
+
+    const { n_ctx, n_batch, flash_attn, cache_type_k, cache_type_v } = req.body;
+    const loadParams = {};
+    if (n_ctx)        loadParams.n_ctx        = Number(n_ctx);
+    if (n_batch)      loadParams.n_batch      = Number(n_batch);
+    if (flash_attn)   loadParams.flash_attn   = true;
+    if (cache_type_k) loadParams.cache_type_k = cache_type_k;
+    if (cache_type_v) loadParams.cache_type_v = cache_type_v;
+
+    storage.saveModel({ ...model, load_params: Object.keys(loadParams).length ? loadParams : null });
+    logger.info('Parámetros de carga actualizados', { id, loadParams });
+    res.json({ success: true, load_params: loadParams });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

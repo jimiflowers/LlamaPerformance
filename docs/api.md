@@ -50,10 +50,35 @@ Remove a model from the database.
 ### POST /models/:id/start
 Send a load request to the llama.cpp server (`POST /models/load`).
 For vision models the `mmproj` path is automatically included.
+Any load parameters previously saved via `PUT /models/:id/params` are forwarded automatically.
 
 ```json
 { "success": true }
 ```
+
+### PUT /models/:id/params
+Save per-model load parameters. These are persisted in storage and forwarded to llama.cpp on every subsequent load of this model (manual or benchmark-triggered).
+
+**Body** (all fields optional — omit or set to `null`/`false` to revert to server default):
+```json
+{
+  "n_ctx":        8192,
+  "n_batch":      512,
+  "flash_attn":   true,
+  "cache_type_k": "q8_0",
+  "cache_type_v": "q8_0"
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `n_ctx` | integer | Context window size in tokens |
+| `n_batch` | integer | Prompt processing batch size |
+| `flash_attn` | boolean | Enable Flash Attention (`true` only — omit to disable) |
+| `cache_type_k` | string | KV-cache quantisation for K matrix: `q4_0`, `q8_0`, `fp16` |
+| `cache_type_v` | string | KV-cache quantisation for V matrix: `q4_0`, `q8_0`, `fp16` |
+
+**Response:** `{ "success": true, "load_params": { ... } }`
 
 ### POST /models/:id/stop
 Send an unload request to the llama.cpp server (`POST /models/unload`).

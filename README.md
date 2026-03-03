@@ -143,6 +143,17 @@ npm run server   # serves the built UI from the Express server on port 3001
 - **Unload**: unloads the model and frees VRAM
 - **Test**: runs a single inference request to verify the model responds
 - **Info**: shows live slot status from llama.cpp (`/slots`), server configuration (`/props`), and recent benchmark results for that model
+- **Params**: opens a per-model dialog to configure the llama.cpp load parameters that will be sent every time this model is loaded (manually or during a benchmark run):
+
+  | Parameter | Control | Description |
+  |---|---|---|
+  | `n_ctx` | Dropdown + custom input | Context window size: 4k, 8k, 16k, 24k, 32k, or any custom value in tokens |
+  | `n_batch` | Dropdown + custom input | Prompt batch size: 128, 256, 512, 1024, or custom |
+  | `flash_attn` | Checkbox | Enable Flash Attention |
+  | `cache_type_k` | Dropdown | KV-cache quantisation for K: `q4_0`, `q8_0`, `fp16` |
+  | `cache_type_v` | Dropdown | KV-cache quantisation for V: `q4_0`, `q8_0`, `fp16` |
+
+  Leave any field at *Server default* to let llama.cpp use its own startup value. Models with custom params show a **Params \*** button (highlighted in blue) as a reminder.
 
 ### Benchmarks tab
 

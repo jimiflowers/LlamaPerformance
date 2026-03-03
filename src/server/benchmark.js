@@ -361,12 +361,13 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
         const ensureModelReady = async (modelId, model) => {
           // Try cache first
           let modelInfo = orchestrator.getLoadedModelInfo(modelId);
+          const loadParams = model.load_params || {};
 
           if (!modelInfo) {
             benchmarkLogger.warn('Model not loaded in cache, attempting to load', { modelId, alias: model.alias, model_id: model.model_id });
             try {
               // Use model_id first (contains device-specific variant)
-              modelInfo = await orchestrator.loadModel(modelId, model.model_id || model.alias);
+              modelInfo = await orchestrator.loadModel(modelId, model.model_id || model.alias, null, loadParams);
             } catch (err) {
               benchmarkLogger.error('Auto-load failed', { modelId, error: err.message });
               storage.saveLog('benchmark', runId, 'error', `Auto-load failed for ${model.model_id || model.alias}: ${err.message}`);
@@ -380,7 +381,7 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
             benchmarkLogger.warn('Model unhealthy, retrying load', { modelId, alias: modelInfo.alias, health });
             try {
               // Use model_id first (contains device-specific variant)
-              await orchestrator.loadModel(modelId, model.model_id || model.alias);
+              await orchestrator.loadModel(modelId, model.model_id || model.alias, null, loadParams);
               health = await orchestrator.checkModelHealth(modelInfo.alias || model.alias || model.model_id);
             } catch (err) {
               benchmarkLogger.error('Reload failed', { modelId, error: err.message });
