@@ -470,17 +470,35 @@ app.get('/api/models/:id(*)/logs', async (req, res) => {
   const modelId = req.params.id;
   const result = { slots: null, props: null, recentBenchmarks: [] };
 
-  // Slot state en tiempo real (disponible solo cuando hay un modelo cargado)
+  const host = orchestrator.llamaHost;
+  // El router de llama.cpp requiere el nombre del modelo sin extensión
+  const modelName = modelId.replace(/\.gguf$/i, '');
+
+  // Slot state en tiempo real
   try {
-    const slotsRes = await axios.get(`${orchestrator.llamaHost}/slots`, { timeout: 3000 });
-    result.slots = Array.isArray(slotsRes.data) ? slotsRes.data : null;
-  } catch { /* servidor no disponible o slots deshabilitados */ }
+    const slotsRes = await axios.get(`${host}/slots`, {
+      params: { model: modelName },
+      timeout: 5000
+    });
+    result.slots = Array.isArray(slotsRes.data) ? slotsRes.data : slotsRes.data;
+    logger.debug(`/slots OK: ${JSON.stringify(result.slots)}`);
+  } catch (e) {
+    result.slotsError = `${e.response?.status ?? ''} ${e.message}`.trim();
+    logger.warn(`/slots failed: ${result.slotsError}`);
+  }
 
   // Propiedades del servidor (contexto, temperatura por defecto, etc.)
   try {
-    const propsRes = await axios.get(`${orchestrator.llamaHost}/props`, { timeout: 3000 });
+    const propsRes = await axios.get(`${host}/props`, {
+      params: { model: modelName },
+      timeout: 5000
+    });
     result.props = propsRes.data || null;
-  } catch { /* servidor no disponible */ }
+    logger.debug(`/props OK`);
+  } catch (e) {
+    result.propsError = `${e.response?.status ?? ''} ${e.message}`.trim();
+    logger.warn(`/props failed: ${result.propsError}`);
+  }
 
   // Últimos 10 resultados de benchmark para este modelo
   try {
