@@ -12,8 +12,10 @@ function Settings() {
     username: '',
     password: '',
     sshPort: 22,
-    trustRelationship: true
+    trustRelationship: true,
+    sshKeyPath: ''
   });
+  const [availableSshKeys, setAvailableSshKeys] = useState([]);
   const [loading, setLoading] = useState(true);
   const [connSaving, setConnSaving] = useState(false);
   const [sshSaving, setSshSaving] = useState(false);
@@ -44,8 +46,10 @@ function Settings() {
         username: s.ssh?.username || '',
         password: s.ssh?.password || '',
         sshPort: s.ssh?.sshPort || 22,
-        trustRelationship: s.ssh?.trustRelationship !== false
+        trustRelationship: s.ssh?.trustRelationship !== false,
+        sshKeyPath: s.ssh?.sshKeyPath || ''
       });
+      setAvailableSshKeys(s.availableSshKeys || []);
       setIsDefault(s.isDefault === true);
       const url = s.llamaApiUrl || '';
       setLocalMode(url.includes('localhost') || url.includes('127.0.0.1'));
@@ -88,7 +92,8 @@ function Settings() {
           username: ssh.username,
           password: ssh.password === '***' ? undefined : ssh.password,
           sshPort: ssh.sshPort,
-          trustRelationship: ssh.trustRelationship
+          trustRelationship: ssh.trustRelationship,
+          sshKeyPath: ssh.sshKeyPath
         }
       });
       setIsDefault(false);
@@ -301,14 +306,34 @@ function Settings() {
                 checked={ssh.trustRelationship}
                 onChange={e => setSsh({ ...ssh, trustRelationship: e.target.checked })}
               />
-              <span>SSH Trust Relationship (use <code>~/.ssh/id_rsa</code>)</span>
+              <span>Use SSH private key</span>
             </label>
             <small style={{ color: '#7f8c8d', marginTop: '0.25rem', display: 'block' }}>
-              When checked, uses the local private key for authentication. Uncheck to use password.
+              When checked, authenticates with a private key. Uncheck to use password.
             </small>
           </div>
 
-          {!ssh.trustRelationship && (
+          {ssh.trustRelationship ? (
+            <div className="form-group">
+              <label className="form-label">SSH Private Key Path</label>
+              <input
+                list="ssh-keys-list"
+                type="text"
+                className="form-control"
+                value={ssh.sshKeyPath}
+                onChange={e => setSsh({ ...ssh, sshKeyPath: e.target.value })}
+                placeholder={availableSshKeys[0] || '~/.ssh/id_ed25519'}
+              />
+              <datalist id="ssh-keys-list">
+                {availableSshKeys.map(k => <option key={k} value={k} />)}
+              </datalist>
+              <small style={{ color: '#7f8c8d', marginTop: '0.25rem', display: 'block' }}>
+                {availableSshKeys.length > 0
+                  ? `Detected: ${availableSshKeys.join(', ')}. Leave blank to auto-select.`
+                  : 'No keys detected in ~/.ssh/. Enter the full path manually.'}
+              </small>
+            </div>
+          ) : (
             <div className="form-group">
               <label className="form-label">SSH Password</label>
               <input

@@ -14,7 +14,8 @@ const defaults = {
     username: '',
     password: '',
     sshPort: 22,
-    trustRelationship: true
+    trustRelationship: true,
+    sshKeyPath: ''
   }
 };
 

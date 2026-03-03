@@ -494,9 +494,18 @@ app.get('/api/cache/models', async (req, res) => {
 app.get('/api/settings', (req, res) => {
   try {
     const s = settingsManager.get();
+
+    // Detectar claves SSH disponibles en ~/.ssh/
+    const sshDir = path.join(os.homedir(), '.ssh');
+    const keyNames = ['id_ed25519', 'id_rsa', 'id_ecdsa', 'id_dsa'];
+    const availableSshKeys = keyNames
+      .map(name => path.join(sshDir, name))
+      .filter(p => { try { fs.accessSync(p); return true; } catch { return false; } });
+
     res.json({
       ...s,
       isDefault: settingsManager.isDefault,
+      availableSshKeys,
       ssh: {
         ...s.ssh,
         password: s.ssh.password ? '***' : ''
@@ -518,6 +527,7 @@ app.put('/api/settings', async (req, res) => {
       delete patch.ssh.password;
     }
 
+    const currentPort = settingsManager.get().port;
     const updated = settingsManager.update(patch);
 
     // Aplicar cambios en caliente
@@ -532,11 +542,12 @@ app.put('/api/settings', async (req, res) => {
       orchestrator.modelsDir = patch.modelsDir;
     }
 
+    const portChanged = patch.port !== undefined && patch.port !== currentPort;
     res.json({
       success: true,
       settings: { ...updated, ssh: { ...updated.ssh, password: updated.ssh.password ? '***' : '' } },
-      portChanged: !!patch.port,
-      restartRequired: !!patch.port
+      portChanged,
+      restartRequired: portChanged
     });
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
@@ -599,9 +610,20 @@ app.post('/api/settings/ssh-scan', (req, res) => {
 
   if (!username) return res.status(400).json({ error: 'Falta el nombre de usuario SSH en la configuración' });
 
-  const authOptions = trustRelationship
-    ? { privateKey: fs.readFileSync(path.join(os.homedir(), '.ssh', 'id_rsa')) }
-    : { password };
+  let authOptions;
+  if (trustRelationship) {
+    const sshKeyPath = s.ssh.sshKeyPath;
+    const keyPath = sshKeyPath && sshKeyPath.trim()
+      ? sshKeyPath.trim()
+      : (['id_ed25519', 'id_rsa', 'id_ecdsa', 'id_dsa']
+          .map(n => path.join(os.homedir(), '.ssh', n))
+          .find(p => { try { fs.accessSync(p); return true; } catch { return false; } })
+        );
+    if (!keyPath) return res.status(500).json({ error: 'No SSH private key found in ~/.ssh/ — configure the key path in SSH settings.' });
+    authOptions = { privateKey: fs.readFileSync(keyPath) };
+  } else {
+    authOptions = { password };
+  }
 
   const conn = new SshClient();
   let responded = false;
