@@ -85,6 +85,7 @@ class BenchmarkEngine {
       ttft: null,
       tokens: 0,
       interTokenDelays: [],
+      responseText: '',
       error: null,
       timeout: false
     };
@@ -131,6 +132,7 @@ class BenchmarkEngine {
             lastTokenTime = currentTokenTime;
           }
           metrics.tokens++;
+          metrics.responseText += text;
         }
       }
 
@@ -188,6 +190,7 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
       ttfts: [],
       tokenCounts: [],
       allInterTokenDelays: [],
+      responseTexts: [],
       errors: 0,
       timeouts: 0,
       resourceSnapshots: []
@@ -227,6 +230,11 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
         // Collect inter-token delays for TPOT calculation
         if (metrics.interTokenDelays.length > 0) {
           results.allInterTokenDelays.push(...metrics.interTokenDelays);
+        }
+
+        // Keep every successful response (last one used as representative sample)
+        if (metrics.responseText) {
+          results.responseTexts.push(metrics.responseText);
         }
       }
 
@@ -297,7 +305,13 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
 
     return {
       aggregated,
-      raw: results
+      raw: {
+        ...results,
+        // Representative response: last successful iteration
+        lastResponse: results.responseTexts.length > 0
+          ? results.responseTexts[results.responseTexts.length - 1]
+          : null
+      }
     };
   }
 
@@ -516,7 +530,7 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
           try {
             benchmarkLogger.info(`Unloading last model ${lastId} after benchmark completion`);
             await orchestrator.unloadModel(lastId, lastModel?.alias);
-            await waitForVramFree(30000);
+            await waitForVramFree(10000);
           } catch (e) {
             benchmarkLogger.warn(`Could not unload last model ${lastId}`, { error: e.message });
           }

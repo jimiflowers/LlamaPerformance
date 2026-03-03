@@ -242,7 +242,15 @@ app.delete('/api/benchmarks/runs/:id', (req, res) => {
 app.get('/api/benchmarks/runs/:id', async (req, res) => {
   try {
     const run = storage.getBenchmarkRun(req.params.id);
-    const results = storage.getBenchmarkResults(req.params.id);
+    const results = storage.getBenchmarkResults(req.params.id).map(r => {
+      let lastResponse = null;
+      try {
+        const rd = typeof r.raw_data === 'string' ? JSON.parse(r.raw_data) : r.raw_data;
+        lastResponse = rd?.lastResponse ?? null;
+      } catch {}
+      const { raw_data, ...rest } = r;
+      return { ...rest, lastResponse };
+    });
     res.json({ run, results });
   } catch (error) { res.status(500).json({ error: error.message }); }
 });

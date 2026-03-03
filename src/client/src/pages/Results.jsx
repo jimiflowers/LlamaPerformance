@@ -11,6 +11,7 @@ function Results() {
   const [runStatus, setRunStatus] = useState(null);
   const [runProgress, setRunProgress] = useState(0);
   const [initialRunParam, setInitialRunParam] = useState(null);
+  const [expandedCells, setExpandedCells] = useState(new Set());
 
   useEffect(() => {
     // Parse ?run=<runId>
@@ -131,6 +132,31 @@ function Results() {
     }
   };
 
+  const handleExportPDF = () => {
+    window.print();
+  };
+
+  const toggleCell = (key) => {
+    setExpandedCells(prev => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  };
+
+  // Build scenario × model response matrix
+  const getResponseMatrix = () => {
+    const scenarios = [...new Set(results.map(r => r.scenario))];
+    const models = [...new Set(results.map(r => r.model_alias || r.model_id))];
+    const lookup = {};
+    results.forEach(r => {
+      const mk = r.model_alias || r.model_id;
+      if (!lookup[r.scenario]) lookup[r.scenario] = {};
+      lookup[r.scenario][mk] = r.lastResponse;
+    });
+    return { scenarios, models, lookup };
+  };
+
   // Aggregate results by model for comparison
   const getModelAggregates = () => {
     const modelMap = {};
@@ -228,7 +254,7 @@ function Results() {
         </div>
       ) : (
         <>
-          <div className="card">
+          <div className="card no-print">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
               <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
                 <label className="form-label">Select Benchmark Run</label>
@@ -272,6 +298,9 @@ function Results() {
                 </button>
                 <button className="btn btn-secondary" onClick={() => handleExport('csv')}>
                   Export CSV
+                </button>
+                <button className="btn btn-secondary" onClick={handleExportPDF} title="Print / Save as PDF">
+                  Export PDF
                 </button>
                 <button className="btn btn-danger" onClick={handleDeleteRun} title="Delete this run permanently">
                   Delete Run
@@ -321,6 +350,23 @@ function Results() {
 
           {results.length > 0 && (
             <>
+              {/* Print-only header */}
+              {(() => {
+                const run = runs.find(r => r.id === selectedRun);
+                const modelList = run?.model_aliases?.join(', ') || selectedRun;
+                const dateStr = run?.started_at
+                  ? new Date(run.started_at).toLocaleString()
+                  : '';
+                return (
+                  <div className="print-only" style={{ marginBottom: '1rem', paddingBottom: '0.75rem', borderBottom: '2px solid #2c3e50' }}>
+                    <h2 style={{ margin: 0 }}>LlamaPerformance — Benchmark Report</h2>
+                    <p style={{ margin: '0.25rem 0 0', color: '#555' }}>
+                      Models: <strong>{modelList}</strong> &nbsp;|&nbsp; Suite: <strong>{run?.suite_name}</strong> &nbsp;|&nbsp; {dateStr}
+                    </p>
+                  </div>
+                );
+              })()}
+
               {/* Performance Score Cards */}
               <div className="card">
                 <div className="card-header">📊 Performance Scores</div>
@@ -597,7 +643,7 @@ function Results() {
                       <tr key={idx}>
                         <td><strong>{result.model_alias || result.model_id}</strong></td>
                         <td>
-                          <span style={{ 
+                          <span style={{
                             display: 'inline-block',
                             padding: '2px 8px',
                             borderRadius: '4px',
@@ -623,7 +669,7 @@ function Results() {
                         <td>{result.latency_p95?.toFixed(0) || '-'}</td>
                         <td>{result.latency_p99?.toFixed(0) || '-'}</td>
                         <td>
-                          <span style={{ 
+                          <span style={{
                             display: 'inline-block',
                             padding: '2px 8px',
                             borderRadius: '4px',
@@ -640,6 +686,90 @@ function Results() {
                   </tbody>
                 </table>
               </div>
+
+              {/* Response cross-table: scenarios × models */}
+              {(() => {
+                const { scenarios, models, lookup } = getResponseMatrix();
+                const hasAnyResponse = results.some(r => r.lastResponse);
+                if (!hasAnyResponse) return null;
+                return (
+                  <div className="card">
+                    <div className="card-header">💬 Model Responses</div>
+                    <p style={{ padding: '0.5rem 1rem 0', color: '#7f8c8d', fontSize: '0.85rem' }}>
+                      Last response recorded per scenario. Click a cell to expand/collapse.
+                    </p>
+                    <div style={{ overflowX: 'auto' }}>
+                      <table className="table" style={{ tableLayout: 'fixed', minWidth: `${200 + models.length * 260}px` }}>
+                        <colgroup>
+                          <col style={{ width: '200px' }} />
+                          {models.map((_, i) => <col key={i} style={{ width: '260px' }} />)}
+                        </colgroup>
+                        <thead>
+                          <tr>
+                            <th>Scenario</th>
+                            {models.map((m, i) => (
+                              <th key={i} style={{ fontWeight: 'bold', color: COLORS[i % COLORS.length] }}>{m}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {scenarios.map((scenario, si) => (
+                            <tr key={si}>
+                              <td style={{ fontWeight: '600', verticalAlign: 'top', paddingTop: '0.75rem' }}>
+                                <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: '4px', background: '#ecf0f1', fontSize: '0.85rem' }}>
+                                  {scenario}
+                                </span>
+                              </td>
+                              {models.map((model, mi) => {
+                                const text = lookup[scenario]?.[model];
+                                const cellKey = `${si}-${mi}`;
+                                const expanded = expandedCells.has(cellKey);
+                                if (!text) return (
+                                  <td key={mi} style={{ color: '#bdc3c7', fontSize: '0.85rem', verticalAlign: 'top' }}>—</td>
+                                );
+                                return (
+                                  <td key={mi} style={{ verticalAlign: 'top', fontSize: '0.82rem' }}>
+                                    <div
+                                      className="response-cell-text"
+                                      style={{
+                                        maxHeight: expanded ? 'none' : '5.5em',
+                                        overflow: 'hidden',
+                                        lineHeight: '1.4',
+                                        whiteSpace: 'pre-wrap',
+                                        wordBreak: 'break-word',
+                                        color: '#2c3e50',
+                                      }}
+                                    >
+                                      {text}
+                                    </div>
+                                    {text.length > 200 && (
+                                      <button
+                                        className="response-cell-toggle"
+                                        onClick={() => toggleCell(cellKey)}
+                                        style={{
+                                          marginTop: '4px',
+                                          background: 'none',
+                                          border: 'none',
+                                          color: '#3498db',
+                                          cursor: 'pointer',
+                                          fontSize: '0.8rem',
+                                          padding: 0,
+                                        }}
+                                      >
+                                        {expanded ? 'Show less' : 'Show more'}
+                                      </button>
+                                    )}
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                );
+              })()}
             </>
           )}
         </>
