@@ -67,24 +67,34 @@ npm run setup
 
 ## Starting the application
 
+### Normal use (single port)
+
+```bash
+./START_APP.sh
+```
+
+Builds the React frontend and serves everything from the Express server on **port 3001**.
+Open `http://localhost:3001` once the server is ready.
+
 ### Development (hot-reload on both ends)
 
 ```bash
-npm run dev
+./START_APP.sh --dev
+# or: npm run dev
 ```
 
-This starts:
+Skips the build and starts Vite dev server alongside Express:
+- **Frontend (Vite, hot-reload)**: `http://localhost:3000`
 - **Backend API**: `http://localhost:3001`
-- **Frontend (Vite)**: `http://localhost:3000`
 
-### Production build
+Open `http://localhost:3000` for the hot-reloading dev UI.
+
+### Manual production build
 
 ```bash
 npm run build    # builds the React app into src/client/dist/
-npm run server   # serves the built UI from the Express server
+npm run server   # serves the built UI from the Express server on port 3001
 ```
-
-After `npm run build`, the Express server on port 3001 serves the full app at `http://localhost:3001`.
 
 ---
 

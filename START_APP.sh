@@ -1,5 +1,8 @@
 #!/bin/bash
 # START_APP.sh - LlamaPerformance Application Startup Script
+#
+# Default:   builds the frontend, serves everything from Express on port 3001.
+# --dev:     skips the build, starts Vite dev server (port 3000) + Express (port 3001).
 
 echo ""
 echo "==================================================="
@@ -7,13 +10,10 @@ echo "     LlamaPerformance Application Startup"
 echo "==================================================="
 echo ""
 
-# Change to project directory
 cd "$(dirname "$0")"
 PROJECT_DIR=$(pwd)
-
 echo "Project Directory: $PROJECT_DIR"
 
-# Check if node_modules exists
 if [ ! -d "node_modules" ]; then
     echo ""
     echo "Dependencies not installed! Run:"
@@ -21,9 +21,20 @@ if [ ! -d "node_modules" ]; then
     exit 1
 fi
 
-# Start both servers via concurrently
-echo ""
-echo "Starting backend (port 3001) and frontend (port 3000)..."
-echo "Open http://localhost:3000 once both servers are ready."
-echo ""
-npm run dev
+if [ "$1" = "--dev" ]; then
+    echo ""
+    echo "Dev mode: starting Vite (port 3000) + Express (port 3001)..."
+    echo "Open http://localhost:3000 once both servers are ready."
+    echo ""
+    npm run dev
+else
+    echo ""
+    echo "Building frontend..."
+    npm run build || { echo "Build failed. Aborting."; exit 1; }
+
+    echo ""
+    echo "Starting server on port 3001..."
+    echo "Open http://localhost:3001 once the server is ready."
+    echo ""
+    npm run server
+fi
