@@ -464,10 +464,51 @@ app.get('/api/system/stats', (req, res) => {
 
 /**
  * GET /api/models/:id/logs
- * Logs de inferencia de un modelo (stub — devuelve vacío)
+ * Estado en tiempo real del slot de llama.cpp + props del servidor + últimos benchmarks del modelo
  */
-app.get('/api/models/:id(*)/logs', (req, res) => {
-  res.json({ logs: [] });
+app.get('/api/models/:id(*)/logs', async (req, res) => {
+  const modelId = req.params.id;
+  const result = { slots: null, props: null, recentBenchmarks: [] };
+
+  // Slot state en tiempo real (disponible solo cuando hay un modelo cargado)
+  try {
+    const slotsRes = await axios.get(`${orchestrator.llamaHost}/slots`, { timeout: 3000 });
+    result.slots = Array.isArray(slotsRes.data) ? slotsRes.data : null;
+  } catch { /* servidor no disponible o slots deshabilitados */ }
+
+  // Propiedades del servidor (contexto, temperatura por defecto, etc.)
+  try {
+    const propsRes = await axios.get(`${orchestrator.llamaHost}/props`, { timeout: 3000 });
+    result.props = propsRes.data || null;
+  } catch { /* servidor no disponible */ }
+
+  // Últimos 10 resultados de benchmark para este modelo
+  try {
+    const allRuns = storage.getAllBenchmarkRuns();
+    const modelRuns = allRuns.filter(r => {
+      const ids = typeof r.model_ids === 'string' ? JSON.parse(r.model_ids) : (r.model_ids || []);
+      return ids.includes(modelId);
+    }).slice(0, 10);
+    for (const run of modelRuns) {
+      const results = storage.getBenchmarkResults(run.id).filter(r => r.model_id === modelId);
+      for (const r of results) {
+        result.recentBenchmarks.push({
+          runId: run.id,
+          suiteName: run.suite_name,
+          startedAt: run.started_at,
+          scenario: r.scenario,
+          tps: r.tps,
+          genTps: r.gen_tps,
+          ttft: r.ttft,
+          latencyP95: r.latency_p95,
+          errorRate: r.error_rate
+        });
+      }
+    }
+    result.recentBenchmarks.sort((a, b) => b.startedAt - a.startedAt);
+  } catch { /* sin datos */ }
+
+  res.json(result);
 });
 
 /**
