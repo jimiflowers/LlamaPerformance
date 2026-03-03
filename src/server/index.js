@@ -12,6 +12,7 @@ import cacheManager from './cacheManager.js';
 import settingsManager from './settingsManager.js';
 import { Client as SshClient } from 'ssh2';
 import os from 'os';
+import axios from 'axios';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
