@@ -92,7 +92,7 @@ function Settings() {
         }
       });
       setIsDefault(false);
-      showMessage('SSH settings saved');
+      showMessage(localMode ? 'Directory saved' : 'SSH settings saved');
     } catch (err) {
       showMessage(err.response?.data?.error || err.message, true);
     } finally {
@@ -248,76 +248,80 @@ function Settings() {
         </button>
       </div>
 
-      {/* ── Section B: SSH & Model Discovery (hidden in local mode) ── */}
-      {!localMode && <div className="card">
-        <div className="card-header">SSH & Model Discovery</div>
+      {/* ── Section B: Model Discovery ── */}
+      <div className="card">
+        <div className="card-header">{localMode ? 'Local Model Discovery' : 'SSH & Model Discovery'}</div>
 
         <div className="form-group">
-          <label className="form-label">Remote Models Directory</label>
+          <label className="form-label">{localMode ? 'Local Models Directory' : 'Remote Models Directory'}</label>
           <input
             type="text"
             className="form-control"
             value={ssh.modelsDir}
             onChange={e => setSsh({ ...ssh, modelsDir: e.target.value })}
-            placeholder="/docker/models/candidates"
+            placeholder={localMode ? '/home/user/models' : '/docker/models/candidates'}
           />
           <small style={{ color: '#7f8c8d' }}>
-            Full path on the GPU server where .gguf files are stored (SSH host is derived from Llama API URL)
+            {localMode
+              ? 'Full path on this machine where .gguf files are stored'
+              : 'Full path on the GPU server where .gguf files are stored (SSH host is derived from Llama API URL)'}
           </small>
         </div>
 
-        <div style={{ display: 'flex', gap: '1rem' }}>
-          <div className="form-group" style={{ flex: 2 }}>
-            <label className="form-label">SSH Username</label>
-            <input
-              type="text"
-              className="form-control"
-              value={ssh.username}
-              onChange={e => setSsh({ ...ssh, username: e.target.value })}
-              placeholder="ubuntu"
-              autoComplete="username"
-            />
+        {!localMode && <>
+          <div style={{ display: 'flex', gap: '1rem' }}>
+            <div className="form-group" style={{ flex: 2 }}>
+              <label className="form-label">SSH Username</label>
+              <input
+                type="text"
+                className="form-control"
+                value={ssh.username}
+                onChange={e => setSsh({ ...ssh, username: e.target.value })}
+                placeholder="ubuntu"
+                autoComplete="username"
+              />
+            </div>
+            <div className="form-group" style={{ flex: 1 }}>
+              <label className="form-label">SSH Port</label>
+              <input
+                type="number"
+                className="form-control"
+                value={ssh.sshPort}
+                onChange={e => setSsh({ ...ssh, sshPort: parseInt(e.target.value) })}
+                min={1}
+                max={65535}
+              />
+            </div>
           </div>
-          <div className="form-group" style={{ flex: 1 }}>
-            <label className="form-label">SSH Port</label>
-            <input
-              type="number"
-              className="form-control"
-              value={ssh.sshPort}
-              onChange={e => setSsh({ ...ssh, sshPort: parseInt(e.target.value) })}
-              min={1}
-              max={65535}
-            />
-          </div>
-        </div>
 
-        <div className="form-group">
-          <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
-            <input
-              type="checkbox"
-              checked={ssh.trustRelationship}
-              onChange={e => setSsh({ ...ssh, trustRelationship: e.target.checked })}
-            />
-            <span>SSH Trust Relationship (use <code>~/.ssh/id_rsa</code>)</span>
-          </label>
-          <small style={{ color: '#7f8c8d', marginTop: '0.25rem', display: 'block' }}>
-            When checked, uses the local private key for authentication. Uncheck to use password.
-          </small>
-        </div>
-
-        {!ssh.trustRelationship && (
           <div className="form-group">
-            <label className="form-label">SSH Password</label>
-            <input
-              type="password"
-              className="form-control"
-              value={ssh.password}
-              onChange={e => setSsh({ ...ssh, password: e.target.value })}
-              placeholder="••••••••"
-              autoComplete="current-password"
-            />
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={ssh.trustRelationship}
+                onChange={e => setSsh({ ...ssh, trustRelationship: e.target.checked })}
+              />
+              <span>SSH Trust Relationship (use <code>~/.ssh/id_rsa</code>)</span>
+            </label>
+            <small style={{ color: '#7f8c8d', marginTop: '0.25rem', display: 'block' }}>
+              When checked, uses the local private key for authentication. Uncheck to use password.
+            </small>
           </div>
-        )}
+
+          {!ssh.trustRelationship && (
+            <div className="form-group">
+              <label className="form-label">SSH Password</label>
+              <input
+                type="password"
+                className="form-control"
+                value={ssh.password}
+                onChange={e => setSsh({ ...ssh, password: e.target.value })}
+                placeholder="••••••••"
+                autoComplete="current-password"
+              />
+            </div>
+          )}
+        </>}
 
         <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.5rem' }}>
           <button
@@ -325,15 +329,15 @@ function Settings() {
             onClick={handleSaveSsh}
             disabled={sshSaving}
           >
-            {sshSaving ? 'Saving…' : 'Save SSH Settings'}
+            {sshSaving ? 'Saving…' : localMode ? 'Save Directory' : 'Save SSH Settings'}
           </button>
           <button
             className="btn btn-primary"
             onClick={handleSshScan}
-            disabled={scanning || !ssh.username}
-            title={!ssh.username ? 'Enter SSH username first' : ''}
+            disabled={scanning || (!localMode && !ssh.username)}
+            title={!localMode && !ssh.username ? 'Enter SSH username first' : ''}
           >
-            {scanning ? 'Scanning…' : 'Scan Remote Models'}
+            {scanning ? 'Scanning…' : localMode ? 'Scan Local Models' : 'Scan Remote Models'}
           </button>
         </div>
 
@@ -386,7 +390,7 @@ function Settings() {
             </small>
           </div>
         )}
-      </div>}
+      </div>
 
       {/* ── Section C: System Info ── */}
       <div className="card">

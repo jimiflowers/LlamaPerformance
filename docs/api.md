@@ -201,8 +201,10 @@ Applied immediately on save:
 **Response:** `{ ...updatedSettings, restartRequired: true|false }`
 
 ### POST /settings/ssh-scan
-Connect to the remote GPU server via SSH and list `.gguf` files in `modelsDir`.
-SSH host is derived from the hostname in `llamaApiUrl`.
+Scan `modelsDir` for `.gguf` files. The scan method is selected automatically based on `llamaApiUrl`:
+
+- **Local mode** (`localhost` / `127.0.0.1`) — reads the directory directly from the local filesystem.
+- **Remote mode** — connects to the GPU server via SSH (host derived from `llamaApiUrl` hostname).
 
 **Response:**
 ```json

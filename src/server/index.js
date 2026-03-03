@@ -543,13 +543,53 @@ app.put('/api/settings', async (req, res) => {
 
 /**
  * POST /api/settings/ssh-scan
- * Conecta por SSH a la máquina remota y lista los .gguf en modelsDir
+ * Lista los .gguf en modelsDir — localmente o por SSH según el modo configurado
  */
 app.post('/api/settings/ssh-scan', (req, res) => {
   const s = settingsManager.get();
-  const { username, password, sshPort, trustRelationship } = s.ssh;
   const modelsDir = s.modelsDir;
 
+  if (!modelsDir) return res.status(400).json({ error: 'Models directory not configured. Set it in SSH & Model Discovery settings.' });
+
+  // Leer inventario actual para marcar existentes vs nuevos
+  let existing = [];
+  try {
+    const inv = JSON.parse(fs.readFileSync(path.join(__dirname, '../../models.json'), 'utf8'));
+    existing = inv.map(m => m.id);
+  } catch { existing = []; }
+
+  const buildResult = (filenames) => {
+    const all = filenames.filter(f => f.endsWith('.gguf'));
+    const mmprojs = all.filter(f => f.toLowerCase().includes('mmproj'));
+    const models = all.filter(f => !f.toLowerCase().includes('mmproj'));
+    const result = models.map(filename => {
+      const isVL = filename.toLowerCase().includes('vl');
+      const mmproj = isVL && mmprojs.length > 0 ? mmprojs[0] : null;
+      const alias = filename.replace(/\.gguf$/i, '').replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+      return { id: filename, alias, mmproj, isNew: !existing.includes(filename) };
+    });
+    return { models: result, mmprojs };
+  };
+
+  // Detectar modo local
+  let isLocal = false;
+  try {
+    const { hostname } = new URL(s.llamaApiUrl);
+    isLocal = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+  } catch { /* URL inválida — tratar como remoto */ }
+
+  if (isLocal) {
+    // Escaneo local del sistema de archivos
+    try {
+      const files = fs.readdirSync(modelsDir);
+      return res.json(buildResult(files));
+    } catch (err) {
+      return res.status(500).json({ error: `Cannot read directory "${modelsDir}": ${err.message}` });
+    }
+  }
+
+  // Escaneo remoto por SSH
+  const { username, password, sshPort, trustRelationship } = s.ssh;
   let host;
   try {
     host = new URL(s.llamaApiUrl).hostname;
@@ -578,31 +618,8 @@ app.post('/api/settings/ssh-scan', (req, res) => {
       stream.stderr.on('data', () => {});
       stream.on('close', () => {
         conn.end();
-        const all = output.split('\n').map(f => f.trim()).filter(f => f.endsWith('.gguf'));
-        const mmprojs = all.filter(f => f.toLowerCase().includes('mmproj'));
-        const models = all.filter(f => !f.toLowerCase().includes('mmproj'));
-
-        // Leer inventario actual para marcar existentes vs nuevos
-        let existing = [];
-        try {
-          const inv = JSON.parse(fs.readFileSync(path.join(__dirname, '../../models.json'), 'utf8'));
-          existing = inv.map(m => m.id);
-        } catch { existing = []; }
-
-        const result = models.map(filename => {
-          const isVL = filename.toLowerCase().includes('vl');
-          const mmproj = isVL && mmprojs.length > 0 ? mmprojs[0] : null;
-          const cleanName = filename.replace(/\.gguf$/i, '').replace(/[-_]/g, ' ');
-          const alias = cleanName.replace(/\b\w/g, c => c.toUpperCase());
-          return {
-            id: filename,
-            alias,
-            mmproj,
-            isNew: !existing.includes(filename)
-          };
-        });
-
-        if (!responded) { responded = true; res.json({ models: result, mmprojs }); }
+        const filenames = output.split('\n').map(f => f.trim()).filter(Boolean);
+        if (!responded) { responded = true; res.json(buildResult(filenames)); }
       });
     });
   });

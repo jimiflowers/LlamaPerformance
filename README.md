@@ -56,8 +56,8 @@ The application does **not** need to run on the GPU machine itself. The backend 
 
 ```bash
 # 1. Clone the repo
-git clone https://github.com/<your-user>/FLPerformance.git
-cd FLPerformance
+git clone https://github.com/jimmiflowers/LlamaPerformance.git
+cd LlamaPerformance
 
 # 2. Install all dependencies (backend + frontend)
 npm run setup
@@ -105,13 +105,21 @@ After `npm run build`, the Express server on port 3001 serves the full app at `h
    - Set the port where llama.cpp is listening (default `8080`)
    - Click **Save Connection Settings** (SSH section is hidden in local mode)
 
-4. *(Remote mode only)* Go to **Settings → SSH & Model Discovery**:
+4. Go to **Settings → Local/SSH Model Discovery**:
+
+   **Option A — Remote server (SSH)**
    - Set **Remote Models Directory** (full path on the GPU server where `.gguf` files are stored)
    - Set **SSH Username**
    - Either tick **SSH Trust Relationship** (uses `~/.ssh/id_rsa`) or enter the SSH password
    - Click **Save SSH Settings**
    - Click **Scan Remote Models** — a table of `.gguf` files found on the remote server appears
-   - Click **Sync all N to models.json** to replace the local model inventory
+
+   **Option B — Local llama.cpp**
+   - Set **Local Models Directory** (full path on this machine where `.gguf` files are stored)
+   - Click **Save Directory**
+   - Click **Scan Local Models** — a table of `.gguf` files found in that directory appears
+
+   In both cases: click **Sync all N to models.json** to replace the model inventory.
 
 ---
 
@@ -145,7 +153,7 @@ Models must be in **Running** state before they can be benchmarked.
 Three sections, each saved independently:
 
 - **Connection Settings** — Local/remote toggle, Llama API URL (or local port), server port, log level
-- **SSH & Model Discovery** — Remote models path, SSH credentials, scan & sync (hidden in local mode)
+- **Local/SSH Model Discovery** — Models directory path; SSH credentials and remote scan in remote mode, local filesystem scan in local mode
 - **System Information** — Live display of active configuration
 
 ---
@@ -153,7 +161,7 @@ Three sections, each saved independently:
 ## Project structure
 
 ```
-FLPerformance/
+LlamaPerformance/
 ├── src/
 │   ├── server/
 │   │   ├── index.js           # Express server + all API routes

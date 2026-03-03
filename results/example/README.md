@@ -1,6 +1,6 @@
 # Example Results
 
-This directory contains example benchmark results to demonstrate the output format of FLPerformance.
+This directory contains example benchmark results to demonstrate the output format of LlamaPerformance.
 
 ## Files
 
@@ -81,7 +81,7 @@ From `benchmark-example.json`:
 
 ## Creating Your Own Results
 
-After running a benchmark through the FLPerformance UI:
+After running a benchmark through the LlamaPerformance UI:
 
 1. Navigate to the **Results** tab
 2. Select your benchmark run
