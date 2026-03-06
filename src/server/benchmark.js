@@ -114,7 +114,9 @@ class BenchmarkEngine {
           model: modelName,
           messages: [{ role: 'user', content: prompt }],
           max_tokens: scenario.max_tokens || 128,
-          temperature: config.temperature || 0.7,
+          temperature: slotType === 'system'
+            ? (config.temperature_system ?? 0.1)
+            : (config.temperature_user ?? config.temperature ?? 0.7),
           stream: true,
           stream_options: { include_usage: true }
         }, { signal: controller.signal });

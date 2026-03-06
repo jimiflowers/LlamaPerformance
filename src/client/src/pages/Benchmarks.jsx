@@ -453,9 +453,26 @@ function Benchmarks() {
                         <div style={{ fontSize: '0.85rem', color: '#7f8c8d', marginBottom: '0.25rem' }}>
                           {scenario.description}
                         </div>
-                        <div style={{ fontSize: '0.8rem', color: '#95a5a6', fontStyle: 'italic' }}>
-                          "{scenario.prompt.substring(0, 80)}{scenario.prompt.length > 80 ? '...' : ''}"
-                        </div>
+                        {scenario.prompt_system && scenario.prompt_user ? (
+                          <>
+                            <div style={{ fontSize: '0.8rem', color: '#95a5a6', marginBottom: '0.15rem' }}>
+                              <span style={{ fontWeight: 600, color: '#7f8c8d' }}>system: </span>
+                              <span style={{ fontStyle: 'italic' }}>
+                                "{scenario.prompt_system.substring(0, 80)}{scenario.prompt_system.length > 80 ? '...' : ''}"
+                              </span>
+                            </div>
+                            <div style={{ fontSize: '0.8rem', color: '#95a5a6' }}>
+                              <span style={{ fontWeight: 600, color: '#7f8c8d' }}>user: </span>
+                              <span style={{ fontStyle: 'italic' }}>
+                                "{scenario.prompt_user.substring(0, 80)}{scenario.prompt_user.length > 80 ? '...' : ''}"
+                              </span>
+                            </div>
+                          </>
+                        ) : (
+                          <div style={{ fontSize: '0.8rem', color: '#95a5a6', fontStyle: 'italic' }}>
+                            "{(scenario.prompt || '').substring(0, 80)}{(scenario.prompt || '').length > 80 ? '...' : ''}"
+                          </div>
+                        )}
                         <div style={{ fontSize: '0.75rem', color: '#bdc3c7', marginTop: '0.25rem' }}>
                           Max tokens: {scenario.max_tokens}
                         </div>
