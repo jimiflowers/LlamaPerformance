@@ -1,6 +1,6 @@
 # LlamaPerformance
 
-> **Fork** of [leestott/FLPerformance](https://github.com/leestott/FLPerformance), adapted to benchmark GGUF models served by a remote **llama.cpp** or **llama.cpp** server instead of Microsoft Foundry Local.
+> **Fork** of [leestott/FLPerformance](https://github.com/leestott/FLPerformance), adapted to benchmark GGUF models served by a remote **llama-swap** / **llama.cpp** server instead of Microsoft Foundry Local.
 
 A full-stack web application for measuring and comparing the inference performance of multiple LLMs running on a GPU server.
 
@@ -12,29 +12,33 @@ The original FLPerformance was built around Microsoft Foundry Local (Windows, ON
 
 | Original | This fork |
 |----------|-----------|
-| Microsoft Foundry Local SDK | Direct HTTP to llama.cpp OpenAI-compatible API |
+| Microsoft Foundry Local SDK | Direct HTTP to llama-swap / llama.cpp OpenAI-compatible API |
 | ONNX models | GGUF models |
 | Windows-centric | Linux (tested on Ubuntu + AMD ROCm) |
 | Hardcoded local service | Remote GPU server via configurable URL |
 | No SSH integration | SSH scan to discover `.gguf` files on remote server |
 | Configuration via `.env` only | Settings UI persisted to `settings.json` |
+| Single-prompt scenarios | Dual-slot concurrent benchmarking (system + user prompts) |
 
 ---
 
 ## Features
 
-- **Model management**: Load and unload GGUF models via the llama.cpp router
+- **Model management**: Add and track GGUF models; llama-swap loads them implicitly on first inference request
 - **Benchmark engine**: Runs standardised prompt suites and collects:
-  - TTFT (time to first token)
-  - TPOT (time per output token)
-  - TPS / GenTPS (throughput)
-  - P50 / P95 / P99 latency percentiles
+  - TTFT (time to first token) — per slot
+  - TPOT (time per output token) — combined across both slots
+  - TPS / GenTPS (throughput) — combined token count over wall-clock time
+  - P50 / P95 / P99 latency percentiles — wall-clock of the concurrent pair
   - CPU, RAM, GPU utilisation
+  - VRAM peak usage (MB and %) and free margin
   - Error rate and performance score
-- **Multi-model sequential benchmarking**: Select any number of models — including stopped ones — and the engine loads, tests, and unloads each in sequence automatically, then shows a side-by-side comparison
+- **Dual-slot concurrent benchmarking**: Suites can define `prompt_system` (JSON, low temperature) and `prompt_user` (natural language, higher temperature) pairs — both slots are sent concurrently via `Promise.all`, mirroring a `parallel=2` llama-swap setup. All metrics (tokens, delays, latency) aggregate both slots
+- **Multi-model sequential benchmarking**: Select any number of models — including stopped ones — and the engine tests each in sequence, waiting for VRAM to clear between models, then shows a side-by-side comparison
 - **Multi-model comparison**: Side-by-side charts and a radar overview
+- **VRAM usage section**: Bar chart and table of peak VRAM consumption per model, with a 100% reference line and colour-coded margin alerts
 - **Vision model support**: Automatic mmproj pairing for VL models
-- **SSH model discovery**: Scan a remote directory for `.gguf` files and sync to `models.json` without leaving the UI
+- **SSH model discovery**: Scan a remote directory for `.gguf` files and sync to `models.json` without leaving the UI; llama-swap model list also queried as a fallback
 - **Settings UI**: All runtime configuration (API URL, SSH credentials, log level) stored in `settings.json` — no need to restart for most changes
 - **Export**: JSON and CSV download of any benchmark run
 - **Storage**: SQLite (preferred) with automatic JSON fallback
@@ -46,8 +50,9 @@ The original FLPerformance was built around Microsoft Foundry Local (Windows, ON
 | Component | Notes |
 |-----------|-------|
 | Node.js ≥ 18 | Backend and Vite dev server |
-| llama.cpp or llama.cpp | Running on a GPU machine, accessible by HTTP |
+| llama-swap or llama.cpp | Running on a GPU machine, accessible by HTTP |
 | SSH access to GPU machine | Only needed for the model discovery scan |
+| GPU stats endpoint (optional) | `http://<gpu-host>:9999/gpu` — used for real-time VRAM telemetry during benchmarks |
 
 The application does **not** need to run on the GPU machine itself. The backend can run on any Linux host that has network access to the llama.cpp server.
 
@@ -157,14 +162,15 @@ npm run server   # serves the built UI from the Express server on port 3001
 
 ### Benchmarks tab
 
-1. Select a benchmark suite (the default suite has 9 scenarios)
+1. Select a benchmark suite. The `default` suite has 9 single-prompt scenarios; `mayordomo_spanish` has 8 dual-slot scenarios in Spanish (each sends a JSON system prompt and a natural-language user prompt concurrently)
 2. Tick one or more models — **any model can be selected, regardless of whether it is currently loaded**
-3. Configure iterations, timeout, and temperature
+3. Configure iterations, timeout, and temperature. Dual-prompt suites expose two separate temperature fields: **System temperature** (for JSON prompts, default 0.1) and **User temperature** (for natural-language prompts, default 0.7)
 4. Click **Run Benchmark** — the engine will:
-   - Load each selected model in order
-   - Wait for the previous model's VRAM to be fully released before loading the next (polls `/v1/models`, up to 60 s timeout)
-   - Apply a 3-second settling pause after each load to avoid inflated TTFT on the first inference
-   - Unload every model when its tests are done (including the last one)
+   - For each model in order: send the first inference request (triggering implicit load in llama-swap), then retry `GET /upstream/{model}/health` every 3 s for up to 60 s until the model reports `status: ok`
+   - For dual-slot suites: send system and user prompts concurrently (`Promise.all`) — wall-clock latency and total tokens aggregate both slots
+   - Apply a 3-second settling pause after model confirmation to avoid inflated TTFT on the first timed inference
+   - Between models: poll `GET /running` every 500 ms until the previous model disappears (up to 60 s), confirming VRAM is free before triggering the next load
+   - Unload the last model when its tests are done
 5. The progress card shows the model currently under test and its position in the queue (e.g. "Testing Gemma-3-12B (2 of 3)")
 
 ### Results tab
@@ -174,7 +180,8 @@ npm run server   # serves the built UI from the Express server on port 3001
 - **Export JSON / CSV** — filename includes model name and datetime
 - **Export PDF** — triggers the browser's print dialog; the UI (sidebar, controls) is hidden and a report header is injected automatically, so the printed output contains only charts and data tables. Use "Save as PDF" in the browser print dialog to get a PDF file.
 - **Delete Run** — permanently removes a run from storage
-- **Model Responses table** — below the Detailed Results table, a cross-table shows the actual text returned by each model for every scenario (rows = scenarios, columns = models). Cells are truncated to ~5 lines with a **Show more / Show less** toggle. The full text is always shown when printing.
+- **VRAM Usage section** — table (Model | VRAM peak MB | VRAM peak % | GPU avg % | Free margin MB) and bar chart with a red 100% reference line. Sorted by consumption descending. Colour-coded: green < 75%, orange 75–90%, red > 90%; margin red if < 500 MB. Only shown when VRAM telemetry data is present
+- **Model Responses table** — below the Detailed Results table, a cross-table shows the actual text returned by each model for every scenario (rows = scenarios, columns = models). For dual-slot suites, each cell shows both the **User** and **System** responses, labelled. Cells are truncated to ~5 lines with a **Show more / Show less** toggle. The full text is always shown when printing.
 
 ### Settings tab
 
@@ -193,8 +200,8 @@ LlamaPerformance/
 ├── src/
 │   ├── server/
 │   │   ├── index.js           # Express server + all API routes
-│   │   ├── orchestrator.js    # llama.cpp connection manager
-│   │   ├── benchmark.js       # Benchmark execution engine
+│   │   ├── orchestrator.js    # llama-swap connection manager (health, idle detection)
+│   │   ├── benchmark.js       # Benchmark engine (dual-slot, VRAM metrics)
 │   │   ├── storage.js         # SQLite + JSON persistence
 │   │   ├── cacheManager.js    # Model inventory (models.json)
 │   │   ├── settingsManager.js # Persistent settings (settings.json)
@@ -204,7 +211,12 @@ LlamaPerformance/
 │           ├── pages/         # Dashboard, Models, Benchmarks, Results, Settings, Cache
 │           └── utils/api.js   # Axios client
 ├── benchmarks/
-│   └── suites/default.json    # 9 benchmark scenarios
+│   └── suites/
+│       ├── default.json           # 9 single-prompt benchmark scenarios
+│       └── mayordomo_spanish.json # 8 dual-slot scenarios (ES) for role-model selection
+├── docs/
+│   ├── api.md                 # Full API reference
+│   └── changelog.md           # Detailed changelog per session
 ├── models.json                # GGUF model inventory — gitignored, created via Settings → SSH scan
 ├── settings.json              # Runtime configuration — gitignored, created on first Settings save
 ├── results/                   # Benchmark results (SQLite or JSON)
@@ -276,7 +288,10 @@ The Settings → SSH scan automatically detects mmproj files and assigns them to
 - Large models may require more time for TTFT on first load
 
 ### Multi-model benchmark slower than individual runs
-This is expected: the engine intentionally waits for VRAM to be fully freed between models (polls `/v1/models` up to 60 s) and adds a 3-second settling pause after each load. If you run benchmarks individually you skip these safety delays. The results should be comparable — if they are still significantly worse, check that no other process is using GPU memory during the run.
+This is expected: the engine intentionally waits for VRAM to be fully freed between models (polls `GET /running` every 500 ms, up to 60 s) and adds a 3-second settling pause after model confirmation. If you run benchmarks individually you skip these safety delays. The results should be comparable — if they are still significantly worse, check that no other process is using GPU memory during the run.
+
+### VRAM section does not appear in Results
+The GPU stats endpoint (`http://aion.home.lan:9999/gpu`) must be reachable during the benchmark run. If it is not available, `getGpuMetrics()` returns nulls silently and the section is hidden. Check connectivity to the stats service on the GPU host.
 
 ---
 

@@ -48,8 +48,8 @@ Add a model to the database.
 Remove a model from the database.
 
 ### POST /models/:id/start
-Send a load request to the llama.cpp server (`POST /models/load`).
-For vision models the `mmproj` path is automatically included.
+Registers the model as `running` in local storage. When using **llama-swap**, the actual model load is triggered implicitly by the first inference request — no explicit load call is made to the server.
+For vision models the `mmproj` path is automatically included in any subsequent direct llama.cpp load calls.
 Any load parameters previously saved via `PUT /models/:id/params` are forwarded automatically.
 
 ```json
@@ -168,20 +168,23 @@ Start an async benchmark run. Returns immediately; poll `/benchmarks/runs/:id/st
     "concurrency": 1,
     "timeout": 60000,
     "temperature": 0.7,
+    "temperature_system": 0.1,
+    "temperature_user": 0.7,
     "streaming": true
   }
 }
 ```
 
-- `modelIds` — any model IDs from the database, regardless of `status`. Stopped models will be loaded automatically before their tests begin.
+- `modelIds` — any model IDs from the database, regardless of `status`. Stopped models will be loaded implicitly by llama-swap on first inference.
 - `selectedScenarios` — optional; if omitted, all scenarios in the suite are run.
+- `temperature_system` / `temperature_user` — per-slot temperatures for dual-prompt suites. If omitted, fall back to `temperature` for both slots.
 
 **Execution order for each model:**
-1. Unload the previous model (if any) and wait until `/v1/models` returns empty (≤ 60 s)
-2. Load the current model via `POST /models/load`
-3. Wait 3 seconds for the model to settle before the first inference
-4. Run all selected scenarios
-5. After the last model finishes, unload it too (wait ≤ 10 s for VRAM to free)
+1. Send first health probe to `/upstream/{model}/health` to trigger implicit load in llama-swap; retry every 3 s for up to 60 s until `status: ok`
+2. Wait 3 seconds for the model to settle before the first timed inference
+3. Run all selected scenarios. For dual-prompt suites (`prompt_system` + `prompt_user`), both slots are sent concurrently via `Promise.all`
+4. Between models: poll `GET /running` every 500 ms until the previous model disappears (≤ 60 s), confirming VRAM is free
+5. After the last model finishes, unload it and confirm via `GET /running` (≤ 60 s)
 
 **Response:** `{ "success": true, "runId": "run_xyz", "message": "Benchmark iniciado en segundo plano" }`
 
@@ -225,13 +228,33 @@ Get a specific run with its results.
       "cpu_avg": 35.2,
       "ram_avg": 42.1,
       "gpu_avg": 68.5,
-      "lastResponse": "Hello! How can I assist you today?..."
+      "vram_max_mb": 9216,
+      "vram_total_mb": 12288,
+      "vram_pct": 75.0,
+      "gpu_use_avg": 82.3,
+      "system_ttft": 210,
+      "system_latency_p50": 740,
+      "concurrent_slots": 2,
+      "lastResponse": "Hello! How can I assist you today?...",
+      "lastSystemResponse": "{\"role\": \"profesor\", \"confidence\": 0.95}"
     }
   ]
 }
 ```
 
-`lastResponse` — the text of the last successful inference response recorded for that scenario. `null` if all iterations failed or the run pre-dates response storage. Extracted from the `raw_data` blob; `raw_data` itself is not returned.
+| Field | Description |
+|---|---|
+| `lastResponse` | Last successful user-slot response text. `null` if all iterations failed |
+| `lastSystemResponse` | Last successful system-slot response text (dual-prompt suites only). `null` for legacy suites |
+| `vram_max_mb` | Peak VRAM used (MB) across all iterations. `null` if GPU stats endpoint was unreachable |
+| `vram_total_mb` | Total VRAM of the card (MB) |
+| `vram_pct` | `vram_max_mb / vram_total_mb × 100` |
+| `gpu_use_avg` | Average GPU utilisation % |
+| `system_ttft` | Median TTFT of the system slot (ms). `null` for legacy suites |
+| `system_latency_p50` | P50 latency of the system slot (ms). `null` for legacy suites |
+| `concurrent_slots` | `2` for dual-prompt suites, `1` for legacy |
+
+`raw_data` itself is not returned. All response and VRAM fields are extracted from it server-side.
 
 ### GET /benchmarks/runs/:id/status
 Poll status of an in-progress benchmark run.
