@@ -202,7 +202,7 @@ class LlamaOrchestrator {
     logger.info(`>>> LLAMA-SWAP: Esperando que ${modelName} quede idle antes de continuar`);
     while (Date.now() < deadline) {
       try {
-        const res = await axios.get(`${this.llamaHost}/upstream/${modelName}`, { timeout: 5000 });
+        const res = await axios.get(`${this.llamaHost}/upstream/${modelName}`, { timeout: 5000, maxRedirects: 5 });
         if (res.data?.status === 'idle' || res.data?.status === 'stopped') {
           logger.info(`>>> LLAMA-SWAP: ${modelName} confirmado idle — VRAM libre`);
           return true;

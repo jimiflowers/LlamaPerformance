@@ -528,7 +528,7 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
           try {
             benchmarkLogger.info(`Unloading last model ${lastId} after benchmark completion`);
             await orchestrator.unloadModel(lastId, lastModel?.alias);
-            await waitForVramFree(10000);
+            await waitForVramFree(lastId, 10000);
           } catch (e) {
             benchmarkLogger.warn(`Could not unload last model ${lastId}`, { error: e.message });
           }
