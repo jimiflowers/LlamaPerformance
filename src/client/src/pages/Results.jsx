@@ -152,7 +152,7 @@ function Results() {
     results.forEach(r => {
       const mk = r.model_alias || r.model_id;
       if (!lookup[r.scenario]) lookup[r.scenario] = {};
-      lookup[r.scenario][mk] = r.lastResponse;
+      lookup[r.scenario][mk] = { user: r.lastResponse ?? null, system: r.lastSystemResponse ?? null };
     });
     return { scenarios, models, lookup };
   };
@@ -690,7 +690,7 @@ function Results() {
               {/* Response cross-table: scenarios × models */}
               {(() => {
                 const { scenarios, models, lookup } = getResponseMatrix();
-                const hasAnyResponse = results.some(r => r.lastResponse);
+                const hasAnyResponse = results.some(r => r.lastResponse || r.lastSystemResponse);
                 if (!hasAnyResponse) return null;
                 return (
                   <div className="card">
@@ -721,12 +721,16 @@ function Results() {
                                 </span>
                               </td>
                               {models.map((model, mi) => {
-                                const text = lookup[scenario]?.[model];
+                                const entry = lookup[scenario]?.[model];
+                                const userText = entry?.user;
+                                const sysText = entry?.system;
                                 const cellKey = `${si}-${mi}`;
                                 const expanded = expandedCells.has(cellKey);
-                                if (!text) return (
+                                if (!userText && !sysText) return (
                                   <td key={mi} style={{ color: '#bdc3c7', fontSize: '0.85rem', verticalAlign: 'top' }}>—</td>
                                 );
+                                const hasDual = userText && sysText;
+                                const combinedLen = (userText?.length || 0) + (sysText?.length || 0);
                                 return (
                                   <td key={mi} style={{ verticalAlign: 'top', fontSize: '0.82rem' }}>
                                     <div
@@ -740,9 +744,20 @@ function Results() {
                                         color: '#2c3e50',
                                       }}
                                     >
-                                      {text}
+                                      {hasDual ? (
+                                        <>
+                                          <div style={{ marginBottom: '0.4rem' }}>
+                                            <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#7f8c8d', display: 'block', marginBottom: '2px' }}>User</span>
+                                            {userText}
+                                          </div>
+                                          <div>
+                                            <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#7f8c8d', display: 'block', marginBottom: '2px' }}>System</span>
+                                            {sysText}
+                                          </div>
+                                        </>
+                                      ) : (userText || sysText)}
                                     </div>
-                                    {text.length > 200 && (
+                                    {combinedLen > 200 && (
                                       <button
                                         className="response-cell-toggle"
                                         onClick={() => toggleCell(cellKey)}

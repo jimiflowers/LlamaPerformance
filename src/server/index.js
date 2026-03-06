@@ -241,12 +241,14 @@ app.get('/api/benchmarks/runs/:id', async (req, res) => {
     const run = storage.getBenchmarkRun(req.params.id);
     const results = storage.getBenchmarkResults(req.params.id).map(r => {
       let lastResponse = null;
+      let lastSystemResponse = null;
       try {
         const rd = typeof r.raw_data === 'string' ? JSON.parse(r.raw_data) : r.raw_data;
         lastResponse = rd?.lastResponse ?? null;
+        lastSystemResponse = rd?.lastSystemResponse ?? null;
       } catch {}
       const { raw_data, ...rest } = r;
-      return { ...rest, lastResponse };
+      return { ...rest, lastResponse, lastSystemResponse };
     });
     res.json({ run, results });
   } catch (error) { res.status(500).json({ error: error.message }); }

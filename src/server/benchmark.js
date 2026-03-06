@@ -219,32 +219,42 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
       const inferenceResult = await this.runSingleInference(modelInfo, scenario, config);
       const resourcesAfter = await this.collectResourceMetrics();
 
-      // Usar métricas del slot usuario como referencia principal de latencia
-      const primaryMetrics = inferenceResult.userMetrics;
-      const latency = primaryMetrics.endTime - primaryMetrics.startTime;
+      const userM = inferenceResult.userMetrics;
+      const sysM = inferenceResult.systemMetrics;
+      const concurrent = inferenceResult.concurrent && sysM;
+
+      // Wall-clock latency: for concurrent pairs, span both slots
+      const pairStart = concurrent ? Math.min(sysM.startTime, userM.startTime) : userM.startTime;
+      const pairEnd = concurrent ? Math.max(sysM.endTime, userM.endTime) : userM.endTime;
+      const latency = pairEnd - pairStart;
 
       results.iterations.push(inferenceResult);
 
-      if (!primaryMetrics.error && !primaryMetrics.timeout) {
-        results.latencies.push(latency);
-        if (primaryMetrics.ttft !== null) results.ttfts.push(primaryMetrics.ttft);
-        results.tokenCounts.push(primaryMetrics.tokens);
-        if (primaryMetrics.interTokenDelays.length > 0) {
-          results.allInterTokenDelays.push(...primaryMetrics.interTokenDelays);
-        }
-        if (primaryMetrics.responseText) results.responseTexts.push(primaryMetrics.responseText);
+      // Count iteration as failed if either slot fails
+      const iterHasTimeout = userM.timeout || (concurrent && sysM.timeout);
+      const iterHasError = !iterHasTimeout && (userM.error || (concurrent && sysM.error));
+      if (iterHasTimeout) results.timeouts++;
+      else if (iterHasError) results.errors++;
 
-        // Métricas del slot sistema (si existe)
-        if (inferenceResult.systemMetrics && !inferenceResult.systemMetrics.error) {
+      if (!iterHasTimeout && !iterHasError) {
+        results.latencies.push(latency);
+        if (userM.ttft !== null) results.ttfts.push(userM.ttft);
+        // Tokens: sum both slots
+        results.tokenCounts.push(userM.tokens + (concurrent ? (sysM.tokens || 0) : 0));
+        // Inter-token delays: combine both slots
+        if (userM.interTokenDelays.length > 0) results.allInterTokenDelays.push(...userM.interTokenDelays);
+        if (userM.responseText) results.responseTexts.push(userM.responseText);
+
+        if (concurrent) {
           if (!results.systemLatencies) results.systemLatencies = [];
           if (!results.systemTtfts) results.systemTtfts = [];
-          results.systemLatencies.push(inferenceResult.systemMetrics.endTime - inferenceResult.systemMetrics.startTime);
-          if (inferenceResult.systemMetrics.ttft !== null) results.systemTtfts.push(inferenceResult.systemMetrics.ttft);
+          if (!results.systemResponseTexts) results.systemResponseTexts = [];
+          results.systemLatencies.push(sysM.endTime - sysM.startTime);
+          if (sysM.ttft !== null) results.systemTtfts.push(sysM.ttft);
+          if (sysM.interTokenDelays.length > 0) results.allInterTokenDelays.push(...sysM.interTokenDelays);
+          if (sysM.responseText) results.systemResponseTexts.push(sysM.responseText);
         }
       }
-
-      if (primaryMetrics.error) results.errors++;
-      if (primaryMetrics.timeout) results.timeouts++;
 
       results.resourceSnapshots.push({ before: resourcesBefore, after: resourcesAfter });
       await new Promise(resolve => setTimeout(resolve, 100));
@@ -314,9 +324,11 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
       aggregated,
       raw: {
         ...results,
-        // Representative response: last successful iteration
         lastResponse: results.responseTexts.length > 0
           ? results.responseTexts[results.responseTexts.length - 1]
+          : null,
+        lastSystemResponse: results.systemResponseTexts?.length > 0
+          ? results.systemResponseTexts[results.systemResponseTexts.length - 1]
           : null
       }
     };
