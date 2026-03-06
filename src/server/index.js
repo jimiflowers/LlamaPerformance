@@ -111,24 +111,19 @@ app.post('/api/models/:id/start', async (req, res) => {
   try {
     const { id } = req.params;
     const model = storage.getModel(id);
-    
     if (!model) return res.status(404).json({ error: 'Modelo no encontrado' });
 
-    // Buscar mmproj en el inventario (models.json) si el modelo lo requiere
-    const inventory = await cacheManager.listCacheModels();
-    const inventoryEntry = inventory.find(m => m.id === id);
-    const mmproj = inventoryEntry?.mmproj || null;
-
-    const loadParams = model.load_params || {};
-    const modelInfo = await orchestrator.loadModel(id, model.model_id || model.alias, mmproj, loadParams);
+    // Con llama-swap la carga es implícita — solo actualizamos el estado en storage
+    storage.saveModel({ ...model, status: 'running', updated_at: Date.now() });
+    logger.info(`>>> API: Modelo ${id} marcado como running — llama-swap lo cargará en la primera request`);
 
     res.json({
       success: true,
-      modelInfo,
+      modelInfo: { id, alias: model.alias, status: 'running' },
       endpoint: orchestrator.getEndpoint()
     });
   } catch (error) {
-    logger.error('Error al cargar modelo en llama-server', { error: error.message });
+    logger.error('Error al registrar modelo en llama-swap', { error: error.message });
     res.status(500).json({ error: error.message });
   }
 });

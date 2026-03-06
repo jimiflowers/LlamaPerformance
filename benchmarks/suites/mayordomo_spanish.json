@@ -1,0 +1,79 @@
+{
+  "name": "mayordomo_spanish",
+  "description": "Suite de benchmark para candidatos al rol Mayordomo. Escenarios en pares concurrentes: slot_system simula al orquestador con JSON, slot_user simula al usuario con lenguaje natural.",
+  "version": "1.0.0",
+  "concurrent_slots": 2,
+  "scenarios": [
+    {
+      "name": "Enrutamiento de Intención",
+      "description": "Capacidad de clasificar y derivar una petición al rol correcto",
+      "prompt_system": "{\"action\": \"classify_intent\", \"input\": \"necesito que me expliques cómo funciona un transformer\", \"available_roles\": [\"mayordomo\", \"ingeniero\", \"profesor\"], \"response_format\": \"json\"}",
+      "prompt_user": "Oye, necesito entender cómo funcionan los transformers en inteligencia artificial, ¿me lo puedes explicar bien?",
+      "max_tokens": 150,
+      "expected_output_length": "medium"
+    },
+    {
+      "name": "Respuesta Factual Corta",
+      "description": "Respuesta directa y concisa a pregunta simple",
+      "prompt_system": "{\"action\": \"query\", \"question\": \"capital de Japón\", \"max_length\": 20, \"response_format\": \"json\"}",
+      "prompt_user": "¿Cuál es la capital de Japón?",
+      "max_tokens": 50,
+      "expected_output_length": "short"
+    },
+    {
+      "name": "Gestión de Tarea",
+      "description": "Creación estructurada de una tarea a partir de lenguaje natural",
+      "prompt_system": "{\"action\": \"create_task\", \"raw_input\": \"recordarme comprar leche mañana a las 9\", \"response_format\": \"json\", \"fields\": [\"title\", \"due_date\", \"priority\"]}",
+      "prompt_user": "Recuérdame que tengo que comprar leche mañana a las 9 de la mañana",
+      "max_tokens": 150,
+      "expected_output_length": "medium"
+    },
+    {
+      "name": "Resumen de Contexto",
+      "description": "Condensar información manteniendo los datos clave",
+      "prompt_system": "{\"action\": \"summarize\", \"text\": \"El proyecto ALIA es una infraestructura de IA local soberana compuesta por tres nodos: AION para inferencia con GPU AMD RX 6700 XT, ATHENA para persistencia con PostgreSQL Redis y ChromaDB, y ATLAS para frontend y gestión de secretos con Traefik e Infisical. La red interna usa WireGuard en el rango 10.0.0.0/29.\", \"max_sentences\": 2, \"response_format\": \"json\"}",
+      "prompt_user": "Resúmeme en pocas palabras qué es el proyecto ALIA y cómo está organizado",
+      "max_tokens": 150,
+      "expected_output_length": "medium"
+    },
+    {
+      "name": "Conversación Casual",
+      "description": "Fluidez y naturalidad en interacción cotidiana",
+      "prompt_system": "{\"action\": \"chat\", \"mood\": \"neutral\", \"context\": null, \"response_format\": \"text\", \"max_length\": 50}",
+      "prompt_user": "¿Qué tal llevas el día? Yo estoy un poco cansado pero con ganas de terminar el proyecto",
+      "max_tokens": 100,
+      "expected_output_length": "short"
+    },
+    {
+      "name": "Extracción de Datos Estructurados",
+      "description": "Parsear lenguaje natural a estructura JSON limpia",
+      "prompt_system": "{\"action\": \"extract\", \"input\": \"reunión con el equipo el viernes 14 a las 16:00 en la sala B, duración estimada 2 horas\", \"schema\": {\"title\": \"string\", \"date\": \"string\", \"time\": \"string\", \"location\": \"string\", \"duration_minutes\": \"integer\"}, \"response_format\": \"json\"}",
+      "prompt_user": "Anota que tengo una reunión con el equipo el viernes 14 a las 4 de la tarde en la sala B, calcula que durará unas 2 horas",
+      "max_tokens": 150,
+      "expected_output_length": "medium"
+    },
+    {
+      "name": "Razonamiento con Contexto",
+      "description": "Capacidad de razonar usando información previa del contexto",
+      "prompt_system": "{\"action\": \"reason\", \"context\": {\"user_location\": \"Madrid\", \"current_time\": \"08:30\", \"weather\": \"lluvia\"}, \"query\": \"¿qué transporte recomiendas hoy?\", \"response_format\": \"json\"}",
+      "prompt_user": "Estoy en Madrid, son las 8 y media y está lloviendo. ¿Qué transporte me recomiendas para ir a trabajar?",
+      "max_tokens": 150,
+      "expected_output_length": "medium"
+    },
+    {
+      "name": "Respuesta Larga y Estructurada",
+      "description": "Generación de respuesta extensa manteniendo coherencia y formato",
+      "prompt_system": "{\"action\": \"explain\", \"topic\": \"ventajas de la IA local frente a la nube\", \"format\": \"bullet_points\", \"min_points\": 4, \"response_format\": \"json\"}",
+      "prompt_user": "Explícame con detalle cuáles son las principales ventajas de tener una IA que corre en local en tu propia casa frente a usar servicios en la nube como ChatGPT",
+      "max_tokens": 350,
+      "expected_output_length": "long"
+    }
+  ],
+  "default_config": {
+    "iterations": 3,
+    "concurrency": 2,
+    "timeout": 60000,
+    "temperature": 0.7,
+    "streaming": true
+  }
+}

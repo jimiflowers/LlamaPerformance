@@ -64,76 +64,17 @@ class LlamaOrchestrator {
    */
   async loadModel(modelId, alias, mmproj = null, loadParams = {}) {
     await this.initialize();
-
-    // llama.cpp espera el nombre sin extensión (igual que en las llamadas curl directas)
     const modelName = modelId.replace(/\.gguf$/i, '');
-
-    try {
-      const body = { model: modelName, n_gpu_layers: -1 };
-
-      if (mmproj) {
-        body.mmproj = `${this.modelsDir}/${mmproj}`;
-        logger.info(`>>> CARGA VL: incluyendo mmproj: ${body.mmproj}`);
-      }
-
-      // Parámetros de carga opcionales definidos por el usuario
-      if (loadParams.n_ctx)        body.n_ctx        = Number(loadParams.n_ctx);
-      if (loadParams.n_batch)      body.n_batch      = Number(loadParams.n_batch);
-      if (loadParams.flash_attn)   body.flash_attn   = true;
-      if (loadParams.cache_type_k) body.cache_type_k = loadParams.cache_type_k;
-      if (loadParams.cache_type_v) body.cache_type_v = loadParams.cache_type_v;
-      if (Object.values(loadParams).some(v => v)) {
-        logger.info(`>>> Parámetros de carga personalizados aplicados: n_ctx=${body.n_ctx ?? '—'} n_batch=${body.n_batch ?? '—'} flash_attn=${body.flash_attn ?? false} kv=${body.cache_type_k ?? '—'}/${body.cache_type_v ?? '—'}`);
-      }
-
-      logger.info(`>>> SOLICITANDO CARGA AL ROUTER: ${modelName}`);
-
-      const response = await axios.post(`${this.llamaHost}/models/load`, body, {
-        timeout: 300000,
-        headers: { "Content-Type": "application/json" }
-      });
-
-      if (response.data && response.data.success === true) {
-        logger.info(`>>> CONFIRMACIÓN RECIBIDA: [SUCCESS: TRUE]`);
-
-        // Marcar todos los demás modelos running como stopped (llama.cpp solo admite uno a la vez)
-        const allModels = storage.getAllModels();
-        for (const m of allModels) {
-          if (m.status === 'running' && m.id !== modelId) {
-            storage.saveModel({ ...m, status: 'stopped', updated_at: Date.now() });
-            logger.info(`>>> Modelo anterior marcado como stopped: ${m.id}`);
-          }
-        }
-
-        this.loadedModels.clear();
-        this.loadedModels.set(modelId, { id: modelId, alias: alias });
-
-        storage.saveModel({
-          id: modelId,
-          model_id: modelId,
-          alias: alias || modelName,
-          status: 'running',
-          updated_at: Date.now()
-        });
-
-        return { id: modelId, alias, status: 'running' };
-      } else {
-        logger.error(`>>> RECHAZO DEL SERVIDOR:`, response.data);
-        throw new Error(`El servidor llama.cpp devolvió success: false`);
-      }
-    } catch (error) {
-      // Error 404: el servidor llama.cpp no reconoce ese nombre de modelo
-      if (error.response?.status === 404) {
-        const msg = `Model "${modelName}" not found in the llama.cpp server. Make sure the model is configured and the name matches exactly (without .gguf extension).`;
-        logger.error(msg);
-        throw new Error(msg);
-      }
-      logger.error('Error en proceso de carga', {
-        msg: error.message,
-        details: error.response?.data
-      });
-      throw error;
-    }
+    logger.info(`>>> LLAMA-SWAP: Carga implícita registrada para ${modelName} — se activará en la primera request`);
+    this.loadedModels.set(modelId, { id: modelId, alias: alias || modelName });
+    storage.saveModel({
+      id: modelId,
+      model_id: modelId,
+      alias: alias || modelName,
+      status: 'running',
+      updated_at: Date.now()
+    });
+    return { id: modelId, alias: alias || modelName, status: 'running' };
   }
 
   /**
@@ -141,37 +82,14 @@ class LlamaOrchestrator {
    */
   async unloadModel(modelId, alias) {
     await this.initialize();
-
     const modelName = modelId.replace(/\.gguf$/i, '');
-
-    try {
-      logger.info(`>>> SOLICITANDO DESCARGA: ${modelName}`);
-
-      const response = await axios.post(`${this.llamaHost}/models/unload`, {
-        model: modelName
-      });
-
-      if (response.data && response.data.success === true) {
-        logger.info(`>>> CONFIRMACIÓN RECIBIDA: [SUCCESS: TRUE] - VRAM liberada para ${modelName}`);
-        
-        this.loadedModels.delete(modelId);
-        
-        const model = storage.getModel(modelId);
-        if (model) {
-          storage.saveModel({ ...model, status: 'stopped', updated_at: Date.now() });
-        }
-        return { success: true, status: 'stopped' };
-      } else {
-        logger.warn(`>>> AVISO: El servidor no encontró el modelo ${modelName} para descargar`);
-        return { success: false };
-      }
-    } catch (error) {
-      logger.error('Error al solicitar descarga', { 
-        error: error.message,
-        details: error.response?.data 
-      });
-      return { success: false };
+    logger.info(`>>> LLAMA-SWAP: Descarga delegada al TTL para ${modelName}`);
+    this.loadedModels.delete(modelId);
+    const model = storage.getModel(modelId);
+    if (model) {
+      storage.saveModel({ ...model, status: 'stopped', updated_at: Date.now() });
     }
+    return { success: true, status: 'stopped' };
   }
 
   // ... (listLoadedModels, checkModelHealth, etc., se mantienen igual) ...
@@ -261,17 +179,43 @@ class LlamaOrchestrator {
    */
   async checkModelHealth(modelAlias) {
     try {
-      const res = await axios.get(`${this.llamaHost}/v1/models`, { timeout: 5000 });
-      const models = res.data?.data || [];
-      const healthy = models.length > 0;
+      const modelName = (modelAlias || '').replace(/\.gguf$/i, '');
+      if (!modelName) {
+        const res = await axios.get(`${this.llamaHost}/health`, { timeout: 5000 });
+        return { healthy: res.status === 200, status: 'running' };
+      }
+      const res = await axios.get(`${this.llamaHost}/upstream/${modelName}`, { timeout: 5000 });
+      const isRunning = res.data?.status === 'running';
       return {
-        healthy,
-        status: healthy ? 'running' : 'no_model_loaded',
-        models
+        healthy: isRunning,
+        status: res.data?.status || 'unknown',
+        models: isRunning ? [{ id: modelName }] : []
       };
     } catch (error) {
       return { healthy: false, status: 'error', error: error.message };
     }
+  }
+
+  async waitForModelIdle(modelId, maxWaitMs = 180000) {
+    const modelName = modelId.replace(/\.gguf$/i, '');
+    const deadline = Date.now() + maxWaitMs;
+    logger.info(`>>> LLAMA-SWAP: Esperando que ${modelName} quede idle antes de continuar`);
+    while (Date.now() < deadline) {
+      try {
+        const res = await axios.get(`${this.llamaHost}/upstream/${modelName}`, { timeout: 5000 });
+        if (res.data?.status === 'idle' || res.data?.status === 'stopped') {
+          logger.info(`>>> LLAMA-SWAP: ${modelName} confirmado idle — VRAM libre`);
+          return true;
+        }
+      } catch {
+        // Si el endpoint falla, asumimos que el modelo ya no está activo
+        logger.info(`>>> LLAMA-SWAP: ${modelName} no responde en /upstream — asumiendo idle`);
+        return true;
+      }
+      await new Promise(r => setTimeout(r, 2000));
+    }
+    logger.warn(`>>> LLAMA-SWAP: Timeout esperando idle para ${modelName} — continuando de todos modos`);
+    return false;
   }
 
   /**

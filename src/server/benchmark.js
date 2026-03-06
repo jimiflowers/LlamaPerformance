@@ -79,79 +79,90 @@ class BenchmarkEngine {
    * ADAPTADO: Inferencia optimizada para el stream de llama.cpp
    */
   async runSingleInference(modelInfo, scenario, config) {
-    const metrics = {
-      startTime: performance.now(),
-      endTime: null,
-      ttft: null,
-      tokens: 0,
-      interTokenDelays: [],
-      responseText: '',
-      error: null,
-      timeout: false
+    const client = orchestrator.getOpenAIClient();
+    const modelName = (modelInfo.id || '').replace(/\.gguf$/i, '');
+
+    // Determinar prompts: soporte para suites duales (prompt_system + prompt_user) y suites legacy (prompt)
+    const hasPromptPair = scenario.prompt_system && scenario.prompt_user;
+    const systemPrompt = hasPromptPair ? scenario.prompt_system : null;
+    const userPrompt = hasPromptPair ? scenario.prompt_user : scenario.prompt;
+
+    const runSlot = async (prompt, slotType) => {
+      const metrics = {
+        slotType,
+        startTime: performance.now(),
+        endTime: null,
+        ttft: null,
+        tokens: 0,
+        interTokenDelays: [],
+        responseText: '',
+        error: null,
+        timeout: false
+      };
+
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => {
+          controller.abort();
+          metrics.timeout = true;
+        }, config.timeout || 60000);
+
+        let firstTokenTime = null;
+        let lastTokenTime = null;
+
+        const stream = await client.chat.completions.create({
+          model: modelName,
+          messages: [{ role: 'user', content: prompt }],
+          max_tokens: scenario.max_tokens || 128,
+          temperature: config.temperature || 0.7,
+          stream: true,
+          stream_options: { include_usage: true }
+        }, { signal: controller.signal });
+
+        let finalUsage = null;
+
+        for await (const chunk of stream) {
+          if (chunk.usage) finalUsage = chunk.usage;
+          const text = chunk.choices[0]?.delta?.content || '';
+          if (text) {
+            const now = performance.now();
+            if (!firstTokenTime) {
+              firstTokenTime = now;
+              metrics.ttft = now - metrics.startTime;
+              lastTokenTime = now;
+            } else {
+              metrics.interTokenDelays.push(now - lastTokenTime);
+              lastTokenTime = now;
+            }
+            metrics.tokens++;
+            metrics.responseText += text;
+          }
+        }
+
+        if (finalUsage?.completion_tokens) metrics.tokens = finalUsage.completion_tokens;
+        clearTimeout(timeoutId);
+      } catch (error) {
+        if (error.name === 'AbortError') metrics.timeout = true;
+        metrics.error = error.message;
+        logger.error(`Inference failed [${slotType}]`, { error: error.message });
+      }
+
+      metrics.endTime = performance.now();
+      return metrics;
     };
 
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => {
-        controller.abort();
-        metrics.timeout = true;
-      }, config.timeout || 60000); // 60s mejor para modelos grandes locales
-
-      const client = orchestrator.getOpenAIClient();
-      const modelName = (modelInfo.id || '').replace(/\.gguf$/i, '');
-
-      // Usamos performance.now() para máxima precisión en el benchmark
-      let firstTokenTime = null;
-      let lastTokenTime = null;
-
-      const stream = await client.chat.completions.create({
-        model: modelName,
-        messages: [{ role: 'user', content: scenario.prompt }],
-        max_tokens: scenario.max_tokens || 128,
-        temperature: config.temperature || 0.7,
-        stream: true,
-        stream_options: { include_usage: true }
-      }, { signal: controller.signal });
-
-      let finalUsage = null;
-
-      for await (const chunk of stream) {
-        // El último chunk de llama.cpp incluye usage si se pidió con include_usage
-        if (chunk.usage) {
-          finalUsage = chunk.usage;
-        }
-        const text = chunk.choices[0]?.delta?.content || '';
-        if (text) {
-          const currentTokenTime = performance.now();
-          if (!firstTokenTime) {
-            firstTokenTime = currentTokenTime;
-            metrics.ttft = firstTokenTime - metrics.startTime;
-            lastTokenTime = currentTokenTime;
-          } else {
-            metrics.interTokenDelays.push(currentTokenTime - lastTokenTime);
-            lastTokenTime = currentTokenTime;
-          }
-          metrics.tokens++;
-          metrics.responseText += text;
-        }
-      }
-
-      // Usar el conteo exacto del servidor si está disponible
-      if (finalUsage?.completion_tokens) {
-        metrics.tokens = finalUsage.completion_tokens;
-      }
-
-      clearTimeout(timeoutId);
-      metrics.endTime = performance.now();
-
-    } catch (error) {
-      if (error.name === 'AbortError') metrics.timeout = true;
-      metrics.error = error.message;
-      metrics.endTime = performance.now();
-      logger.error('Llama.cpp Inference failed', { error: error.message });
+    if (hasPromptPair) {
+      // Lanzar ambos slots concurrentemente — simula parallel=2
+      const [systemMetrics, userMetrics] = await Promise.all([
+        runSlot(systemPrompt, 'system'),
+        runSlot(userPrompt, 'user')
+      ]);
+      return { systemMetrics, userMetrics, concurrent: true };
+    } else {
+      // Suite legacy — comportamiento original
+      const metrics = await runSlot(userPrompt, 'user');
+      return { systemMetrics: null, userMetrics: metrics, concurrent: false };
     }
-
-    return metrics;
   }
 
 
@@ -199,54 +210,41 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
     // Run iterations
     for (let i = 0; i < config.iterations; i++) {
       if (progressCallback) {
-        progressCallback({
-          modelId,
-          scenario: scenario.name,
-          iteration: i + 1,
-          total: config.iterations
-        });
+        progressCallback({ modelId, scenario: scenario.name, iteration: i + 1, total: config.iterations });
       }
 
-      // Collect resource metrics before inference
       const resourcesBefore = await this.collectResourceMetrics();
-      
-      // Run inference with modelInfo
-      const metrics = await this.runSingleInference(modelInfo, scenario, config);
-      
-      // Collect resource metrics after inference
+      const inferenceResult = await this.runSingleInference(modelInfo, scenario, config);
       const resourcesAfter = await this.collectResourceMetrics();
 
-      const latency = metrics.endTime - metrics.startTime;
-      
-      results.iterations.push(metrics);
+      // Usar métricas del slot usuario como referencia principal de latencia
+      const primaryMetrics = inferenceResult.userMetrics;
+      const latency = primaryMetrics.endTime - primaryMetrics.startTime;
 
-      if (!metrics.error && !metrics.timeout) {
+      results.iterations.push(inferenceResult);
+
+      if (!primaryMetrics.error && !primaryMetrics.timeout) {
         results.latencies.push(latency);
-        if (metrics.ttft !== null) {
-          results.ttfts.push(metrics.ttft);
+        if (primaryMetrics.ttft !== null) results.ttfts.push(primaryMetrics.ttft);
+        results.tokenCounts.push(primaryMetrics.tokens);
+        if (primaryMetrics.interTokenDelays.length > 0) {
+          results.allInterTokenDelays.push(...primaryMetrics.interTokenDelays);
         }
-        results.tokenCounts.push(metrics.tokens);
+        if (primaryMetrics.responseText) results.responseTexts.push(primaryMetrics.responseText);
 
-        // Collect inter-token delays for TPOT calculation
-        if (metrics.interTokenDelays.length > 0) {
-          results.allInterTokenDelays.push(...metrics.interTokenDelays);
-        }
-
-        // Keep every successful response (last one used as representative sample)
-        if (metrics.responseText) {
-          results.responseTexts.push(metrics.responseText);
+        // Métricas del slot sistema (si existe)
+        if (inferenceResult.systemMetrics && !inferenceResult.systemMetrics.error) {
+          if (!results.systemLatencies) results.systemLatencies = [];
+          if (!results.systemTtfts) results.systemTtfts = [];
+          results.systemLatencies.push(inferenceResult.systemMetrics.endTime - inferenceResult.systemMetrics.startTime);
+          if (inferenceResult.systemMetrics.ttft !== null) results.systemTtfts.push(inferenceResult.systemMetrics.ttft);
         }
       }
 
-      if (metrics.error) results.errors++;
-      if (metrics.timeout) results.timeouts++;
+      if (primaryMetrics.error) results.errors++;
+      if (primaryMetrics.timeout) results.timeouts++;
 
-      results.resourceSnapshots.push({
-        before: resourcesBefore,
-        after: resourcesAfter
-      });
-
-      // Small delay between iterations
+      results.resourceSnapshots.push({ before: resourcesBefore, after: resourcesAfter });
       await new Promise(resolve => setTimeout(resolve, 100));
     }
 
@@ -294,7 +292,14 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
       gpu_avg: avgGpu,
       total_tokens: totalTokens,
       total_iterations: config.iterations,
-      successful_iterations: config.iterations - results.errors - results.timeouts
+      successful_iterations: config.iterations - results.errors - results.timeouts,
+      system_ttft: results.systemTtfts?.length > 0
+        ? [...results.systemTtfts].sort((a, b) => a - b)[Math.floor(results.systemTtfts.length / 2)]
+        : null,
+      system_latency_p50: results.systemLatencies?.length > 0
+        ? this.calculatePercentile([...results.systemLatencies].sort((a, b) => a - b), 50)
+        : null,
+      concurrent_slots: results.iterations[0]?.concurrent ? 2 : 1
     };
 
     benchmarkLogger.info('Scenario completed', { 
@@ -396,19 +401,9 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
           return modelInfo;
         };
 
-        // Polls /v1/models until llama.cpp reports no active models (VRAM fully freed)
-        const waitForVramFree = async (maxWaitMs = 60000) => {
-          const deadline = Date.now() + maxWaitMs;
-          while (Date.now() < deadline) {
-            const health = await orchestrator.checkModelHealth('');
-            if (!health.healthy) {
-              benchmarkLogger.info('VRAM confirmed free — proceeding with next model load');
-              return true;
-            }
-            await new Promise(r => setTimeout(r, 1500));
-          }
-          benchmarkLogger.warn('Timed out waiting for VRAM to free — proceeding anyway');
-          return false;
+        // Espera a que llama-swap confirme que el modelo anterior ha quedado idle (VRAM libre)
+        const waitForVramFree = async (modelId, maxWaitMs = 180000) => {
+          return await orchestrator.waitForModelIdle(modelId, maxWaitMs);
         };
 
         // Helper to update progress
@@ -443,8 +438,8 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
             } catch (e) {
               benchmarkLogger.warn(`Could not unload ${prevId}`, { error: e.message });
             }
-            // Wait until llama.cpp confirms VRAM is free before loading the next model
-            await waitForVramFree();
+            // Esperar a que llama-swap confirme idle del modelo anterior antes de cargar el siguiente
+            await waitForVramFree(modelIds[i - 1]);
           }
 
           benchmarkLogger.info('Benchmarking model', { modelId });
