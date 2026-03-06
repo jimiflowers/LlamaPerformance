@@ -646,7 +646,7 @@ app.put('/api/settings', async (req, res) => {
  * POST /api/settings/ssh-scan
  * Lista los .gguf en modelsDir — localmente o por SSH según el modo configurado
  */
-app.post('/api/settings/ssh-scan', (req, res) => {
+app.post('/api/settings/ssh-scan', async (req, res) => {
   const s = settingsManager.get();
   const modelsDir = s.modelsDir;
 
