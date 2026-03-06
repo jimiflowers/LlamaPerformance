@@ -218,6 +218,28 @@ class LlamaOrchestrator {
     return false;
   }
 
+  async waitForModelUnloaded(modelId, maxWaitMs = 60000) {
+    const modelName = modelId.replace(/\.gguf$/i, '');
+    const deadline = Date.now() + maxWaitMs;
+    logger.info(`>>> LLAMA-SWAP: Esperando descarga de ${modelName}`);
+    while (Date.now() < deadline) {
+      try {
+        const res = await axios.get(`${this.llamaHost}/running`, { timeout: 5000 });
+        const running = res.data?.running || [];
+        const stillLoaded = running.some(m => m.model === modelName);
+        if (!stillLoaded) {
+          logger.info(`>>> LLAMA-SWAP: ${modelName} descargado — VRAM libre`);
+          return true;
+        }
+      } catch (e) {
+        logger.warn(`>>> LLAMA-SWAP: Error sondeando /running`, { error: e.message });
+      }
+      await new Promise(r => setTimeout(r, 500));
+    }
+    logger.warn(`>>> LLAMA-SWAP: Timeout esperando descarga de ${modelName}`);
+    return false;
+  }
+
   /**
    * Actualiza el host remoto de llama.cpp y fuerza reconexión
    */

@@ -402,8 +402,8 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
         };
 
         // Espera a que llama-swap confirme que el modelo anterior ha quedado idle (VRAM libre)
-        const waitForVramFree = async (modelId, maxWaitMs = 180000) => {
-          return await orchestrator.waitForModelIdle(modelId, maxWaitMs);
+        const waitForVramFree = async (modelId) => {
+          return await orchestrator.waitForModelUnloaded(modelId);
         };
 
         // Helper to update progress
