@@ -56,27 +56,29 @@ class CacheManager {
       const data = await fs.readFile(this.inventoryPath, 'utf8');
       const inventoryModels = JSON.parse(data);
 
-      return inventoryModels.map(model => {
-        // 1. Limpiamos el alias de cualquier etiqueta previa para evitar "(Vision) (Vision)"
-        const baseAlias = model.alias.replace(/\(Vision\)/g, '').replace(/\(Text\)/g, '').trim();
-        const typeLabel = model.mmproj ? '(Vision)' : '(Text)';
-        const finalDisplayName = `${baseAlias} ${typeLabel}`;
-
-        // 2. Devolvemos un objeto "todoterreno" para el Frontend
-        return {
-          id: model.id,           // El nombre del archivo .gguf (Ej: Qwen2.5-VL-7B.gguf)
-          model_id: model.id,     // Duplicamos para asegurar que el POST lo encuentre
-          name: model.id,         // Triplicamos por si el componente usa .name
-          alias: finalDisplayName, // Lo que se verá en el input "Model Alias"
-          description: finalDisplayName, 
-          mmproj: model.mmproj,
-          source: 'inventory'
-        };
-      });
-    } catch (error) {
-      logger.error('Error al leer inventario', { error: error.message });
-      return [];
+      if (inventoryModels.length > 0) {
+        return inventoryModels.map(model => {
+          const baseAlias = model.alias.replace(/\(Vision\)/g, '').replace(/\(Text\)/g, '').trim();
+          const typeLabel = model.mmproj ? '(Vision)' : '(Text)';
+          const finalDisplayName = `${baseAlias} ${typeLabel}`;
+          return {
+            id: model.id,
+            model_id: model.id,
+            name: model.id,
+            alias: finalDisplayName,
+            description: finalDisplayName,
+            mmproj: model.mmproj,
+            source: 'inventory'
+          };
+        });
+      }
+    } catch {
+      // models.json no existe o está malformado — caer al fallback
     }
+
+    // Inventario vacío o ausente — leer directamente de llama-swap
+    logger.info('models.json vacío o ausente — usando fallback de llama-swap');
+    return this._listRemoteFallback();
   }
 
   /**
