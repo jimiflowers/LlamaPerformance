@@ -184,11 +184,11 @@ class LlamaOrchestrator {
         const res = await axios.get(`${this.llamaHost}/health`, { timeout: 5000 });
         return { healthy: res.status === 200, status: 'running' };
       }
-      const res = await axios.get(`${this.llamaHost}/upstream/${modelName}/`, { timeout: 30000, maxRedirects: 0 });
-      const isRunning = res.data?.status === 'running';
+      const res = await axios.get(`${this.llamaHost}/upstream/${modelName}/health`, { timeout: 30000, maxRedirects: 0 });
+      const isRunning = res.status === 200 && res.data?.status === 'ok';
       return {
         healthy: isRunning,
-        status: res.data?.status || 'unknown',
+        status: isRunning ? 'running' : 'unknown',
         models: isRunning ? [{ id: modelName }] : []
       };
     } catch (error) {
@@ -202,8 +202,8 @@ class LlamaOrchestrator {
     logger.info(`>>> LLAMA-SWAP: Esperando que ${modelName} quede idle antes de continuar`);
     while (Date.now() < deadline) {
       try {
-        const res = await axios.get(`${this.llamaHost}/upstream/${modelName}/`, { timeout: 5000, maxRedirects: 0 });
-        if (res.data?.status === 'idle' || res.data?.status === 'stopped') {
+        const res = await axios.get(`${this.llamaHost}/upstream/${modelName}/health`, { timeout: 30000, maxRedirects: 0 });
+        if (res.data?.status !== 'ok') {
           logger.info(`>>> LLAMA-SWAP: ${modelName} confirmado idle — VRAM libre`);
           return true;
         }
