@@ -188,12 +188,26 @@ Scenarios: intent routing, short factual Q&A, task creation, context summarisati
 
 ---
 
+### storage.js — nuevas columnas en benchmark_results
+
+Los campos `vram_max_mb`, `vram_total_mb`, `vram_pct`, `gpu_use_avg`, `system_ttft`, `system_latency_p50` y `concurrent_slots` forman parte de `result.aggregated` pero el `INSERT` de `saveBenchmarkResult` sólo incluía las columnas originales — los nuevos campos se descartaban silenciosamente y nunca llegaban al frontend.
+
+Cambios en `src/server/storage.js`:
+- `CREATE TABLE benchmark_results`: añadidas 7 columnas nuevas (`REAL` / `INTEGER`)
+- Bloque de migraciones (`newColumns`): añadidas las mismas 7 columnas para bases de datos existentes
+- `saveBenchmarkResult` INSERT: actualizado con los 7 nuevos campos y sus valores correspondientes (`?? null` para evitar `undefined`)
+
+`getBenchmarkResults` usa `SELECT *`, así que una vez añadidas las columnas se incluyen automáticamente en la respuesta de `GET /benchmarks/runs/:id` sin más cambios en `index.js`.
+
+---
+
 ### Files changed this session
 
 | File | Changes |
 |---|---|
 | `src/server/orchestrator.js` | `checkModelHealth`: timeout, URL, condition; `waitForModelIdle`: URL, condition; `waitForModelUnloaded` (new) |
 | `src/server/benchmark.js` | `waitForVramFree` bug fix; `ensureModelReady` retry loop; dual-slot metric accumulation; `getGpuMetrics` helper; GPU snapshot in iterations; `vram_*` / `gpu_use_avg` in `aggregated`; `lastSystemResponse` in `raw` |
+| `src/server/storage.js` | `benchmark_results` schema: 7 new columns; migration block updated; `saveBenchmarkResult` INSERT updated |
 | `src/server/index.js` | `GET /benchmarks/runs/:id`: extract and return `lastSystemResponse` |
 | `src/client/src/pages/Results.jsx` | `ReferenceLine` import; `getModelAggregates` VRAM fields; VRAM section (table + chart); Model Responses dual-slot display |
 | `benchmarks/suites/mayordomo_spanish.json` | New dual-prompt benchmark suite (8 scenarios, ES) |

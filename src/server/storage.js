@@ -82,6 +82,13 @@ class Storage {
         total_tokens INTEGER,
         total_iterations INTEGER,
         successful_iterations INTEGER,
+        vram_max_mb REAL,
+        vram_total_mb REAL,
+        vram_pct REAL,
+        gpu_use_avg REAL,
+        system_ttft REAL,
+        system_latency_p50 REAL,
+        concurrent_slots INTEGER,
         raw_data TEXT,
         created_at INTEGER
       )
@@ -96,7 +103,9 @@ class Storage {
       'tpot REAL', 'gen_tps REAL', 'latency_p50 REAL', 'latency_p95 REAL',
       'latency_p99 REAL', 'error_rate REAL', 'timeout_rate REAL',
       'cpu_avg REAL', 'ram_avg REAL', 'gpu_avg REAL',
-      'total_tokens INTEGER', 'total_iterations INTEGER', 'successful_iterations INTEGER'
+      'total_tokens INTEGER', 'total_iterations INTEGER', 'successful_iterations INTEGER',
+      'vram_max_mb REAL', 'vram_total_mb REAL', 'vram_pct REAL', 'gpu_use_avg REAL',
+      'system_ttft REAL', 'system_latency_p50 REAL', 'concurrent_slots INTEGER'
     ];
     for (const col of newColumns) {
       try { this.db.exec(`ALTER TABLE benchmark_results ADD COLUMN ${col}`); }
@@ -209,8 +218,10 @@ class Storage {
           error_rate, timeout_rate,
           cpu_avg, ram_avg, gpu_avg,
           total_tokens, total_iterations, successful_iterations,
+          vram_max_mb, vram_total_mb, vram_pct, gpu_use_avg,
+          system_ttft, system_latency_p50, concurrent_slots,
           raw_data, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         result.id, result.run_id, result.model_id, result.scenario,
         result.tps, result.ttft, result.tpot, result.gen_tps,
@@ -218,6 +229,8 @@ class Storage {
         result.error_rate, result.timeout_rate,
         result.cpu_avg, result.ram_avg, result.gpu_avg,
         result.total_tokens, result.total_iterations, result.successful_iterations,
+        result.vram_max_mb ?? null, result.vram_total_mb ?? null, result.vram_pct ?? null, result.gpu_use_avg ?? null,
+        result.system_ttft ?? null, result.system_latency_p50 ?? null, result.concurrent_slots ?? null,
         JSON.stringify(result.raw_data), now
       );
     }
