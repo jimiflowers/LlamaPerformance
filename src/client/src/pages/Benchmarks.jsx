@@ -14,6 +14,8 @@ function Benchmarks() {
     concurrency: 1,
     timeout: 60000, // 60 seconds - increased for ARM/NPU inference
     temperature: 0.7,
+    temperature_system: 0.1,
+    temperature_user: 0.7,
     streaming: true
   });
   const [loading, setLoading] = useState(false);
@@ -565,6 +567,44 @@ function Benchmarks() {
               required
             />
           </div>
+          {currentSuite?.scenarios?.some(s => s.prompt_system && s.prompt_user) ? (
+            <>
+              <div className="form-group">
+                <label className="form-label">
+                  Temperature — System slot
+                  <span style={{ color: '#7f8c8d', fontWeight: 'normal', marginLeft: '0.5rem' }}>
+                    (0.0 = deterministic, recomendado para JSON)
+                  </span>
+                </label>
+                <input
+                  type="number"
+                  className="form-control"
+                  value={config.temperature_system}
+                  onChange={(e) => setConfig({ ...config, temperature_system: parseFloat(e.target.value) })}
+                  min="0"
+                  max="2"
+                  step="0.05"
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">
+                  Temperature — User slot
+                  <span style={{ color: '#7f8c8d', fontWeight: 'normal', marginLeft: '0.5rem' }}>
+                    (0.0 = deterministic, 1.0 = creative)
+                  </span>
+                </label>
+                <input
+                  type="number"
+                  className="form-control"
+                  value={config.temperature_user}
+                  onChange={(e) => setConfig({ ...config, temperature_user: parseFloat(e.target.value) })}
+                  min="0"
+                  max="2"
+                  step="0.1"
+                />
+              </div>
+            </>
+          ) : (
           <div className="form-group">
             <label className="form-label">
               Temperature
@@ -583,6 +623,7 @@ function Benchmarks() {
               required
             />
           </div>
+          )}
           <div className="form-group">
             <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
               <input
