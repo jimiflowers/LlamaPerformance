@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { benchmarksAPI } from '../utils/api';
-import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar } from 'recharts';
+import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, ReferenceLine } from 'recharts';
 
 function Results() {
   const [runs, setRuns] = useState([]);
@@ -175,6 +175,10 @@ function Results() {
           latency_p95: [],
           latency_p99: [],
           error_rate: [],
+          vram_max_mb: [],
+          vram_pct: [],
+          gpu_use_avg: [],
+          vram_total_mb: null,
           scenarios: 0
         };
       }
@@ -187,21 +191,35 @@ function Results() {
       if (result.latency_p95) modelMap[modelKey].latency_p95.push(result.latency_p95);
       if (result.latency_p99) modelMap[modelKey].latency_p99.push(result.latency_p99);
       if (result.error_rate !== null) modelMap[modelKey].error_rate.push(result.error_rate);
+      if (result.vram_max_mb != null) modelMap[modelKey].vram_max_mb.push(result.vram_max_mb);
+      if (result.vram_pct != null) modelMap[modelKey].vram_pct.push(result.vram_pct);
+      if (result.gpu_use_avg != null) modelMap[modelKey].gpu_use_avg.push(result.gpu_use_avg);
+      if (result.vram_total_mb != null) modelMap[modelKey].vram_total_mb = result.vram_total_mb;
       modelMap[modelKey].scenarios++;
     });
 
-    return Object.values(modelMap).map(m => ({
-      model: m.model, // Use alias instead of model_id
-      avgTps: m.tps.length ? (m.tps.reduce((a, b) => a + b, 0) / m.tps.length).toFixed(2) : 0,
-      avgTtft: m.ttft.length ? (m.ttft.reduce((a, b) => a + b, 0) / m.ttft.length).toFixed(2) : 0,
-      avgTpot: m.tpot.length ? (m.tpot.reduce((a, b) => a + b, 0) / m.tpot.length).toFixed(2) : 0,
-      avgGenTps: m.gen_tps.length ? (m.gen_tps.reduce((a, b) => a + b, 0) / m.gen_tps.length).toFixed(2) : 0,
-      avgP50: m.latency_p50.length ? (m.latency_p50.reduce((a, b) => a + b, 0) / m.latency_p50.length).toFixed(0) : 0,
-      avgP95: m.latency_p95.length ? (m.latency_p95.reduce((a, b) => a + b, 0) / m.latency_p95.length).toFixed(0) : 0,
-      avgP99: m.latency_p99.length ? (m.latency_p99.reduce((a, b) => a + b, 0) / m.latency_p99.length).toFixed(0) : 0,
-      avgErrorRate: m.error_rate.length ? (m.error_rate.reduce((a, b) => a + b, 0) / m.error_rate.length).toFixed(2) : 0,
-      scenarios: m.scenarios
-    }));
+    return Object.values(modelMap).map(m => {
+      const vramMaxMb = m.vram_max_mb.length ? Math.max(...m.vram_max_mb) : null;
+      const vramPct = m.vram_pct.length ? Math.max(...m.vram_pct) : null;
+      const vramTotalMb = m.vram_total_mb;
+      return {
+        model: m.model,
+        avgTps: m.tps.length ? (m.tps.reduce((a, b) => a + b, 0) / m.tps.length).toFixed(2) : 0,
+        avgTtft: m.ttft.length ? (m.ttft.reduce((a, b) => a + b, 0) / m.ttft.length).toFixed(2) : 0,
+        avgTpot: m.tpot.length ? (m.tpot.reduce((a, b) => a + b, 0) / m.tpot.length).toFixed(2) : 0,
+        avgGenTps: m.gen_tps.length ? (m.gen_tps.reduce((a, b) => a + b, 0) / m.gen_tps.length).toFixed(2) : 0,
+        avgP50: m.latency_p50.length ? (m.latency_p50.reduce((a, b) => a + b, 0) / m.latency_p50.length).toFixed(0) : 0,
+        avgP95: m.latency_p95.length ? (m.latency_p95.reduce((a, b) => a + b, 0) / m.latency_p95.length).toFixed(0) : 0,
+        avgP99: m.latency_p99.length ? (m.latency_p99.reduce((a, b) => a + b, 0) / m.latency_p99.length).toFixed(0) : 0,
+        avgErrorRate: m.error_rate.length ? (m.error_rate.reduce((a, b) => a + b, 0) / m.error_rate.length).toFixed(2) : 0,
+        vramMaxMb,
+        vramPct,
+        vramTotalMb,
+        gpuUseAvg: m.gpu_use_avg.length ? (m.gpu_use_avg.reduce((a, b) => a + b, 0) / m.gpu_use_avg.length).toFixed(1) : null,
+        vramFreeMarginMb: vramMaxMb != null && vramTotalMb != null ? vramTotalMb - vramMaxMb : null,
+        scenarios: m.scenarios
+      };
+    });
   };
 
   const modelAggregates = results.length > 0 ? getModelAggregates() : [];
@@ -620,6 +638,57 @@ function Results() {
                   </div>
                 </>
               )}
+
+              {(() => {
+                const vramData = modelAggregates
+                  .filter(m => m.vramPct != null)
+                  .sort((a, b) => b.vramPct - a.vramPct);
+                if (vramData.length === 0) return null;
+                return (
+                  <div className="card">
+                    <div className="card-header">🖥️ VRAM Usage</div>
+                    <div style={{ overflowX: 'auto' }}>
+                      <table className="table">
+                        <thead>
+                          <tr>
+                            <th>Model</th>
+                            <th>VRAM máx (MB)</th>
+                            <th>VRAM máx (%)</th>
+                            <th>GPU uso medio (%)</th>
+                            <th>Margen libre (MB)</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {vramData.map((m, i) => (
+                            <tr key={i}>
+                              <td style={{ fontWeight: 600 }}>{m.model}</td>
+                              <td>{m.vramMaxMb ?? '—'}</td>
+                              <td style={{ color: m.vramPct > 90 ? '#e74c3c' : m.vramPct > 75 ? '#f39c12' : '#27ae60', fontWeight: 600 }}>
+                                {m.vramPct != null ? `${m.vramPct}%` : '—'}
+                              </td>
+                              <td>{m.gpuUseAvg != null ? `${m.gpuUseAvg}%` : '—'}</td>
+                              <td style={{ color: m.vramFreeMarginMb < 500 ? '#e74c3c' : '#27ae60' }}>
+                                {m.vramFreeMarginMb != null ? m.vramFreeMarginMb : '—'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <ResponsiveContainer width="100%" height={300}>
+                      <BarChart data={vramData} margin={{ top: 16, right: 24, left: 0, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="model" />
+                        <YAxis domain={[0, 110]} tickFormatter={v => `${v}%`} />
+                        <Tooltip formatter={(v) => `${v}%`} />
+                        <Legend />
+                        <ReferenceLine y={100} stroke="#e74c3c" strokeDasharray="4 4" label={{ value: '100%', fill: '#e74c3c', fontSize: 12 }} />
+                        <Bar dataKey="vramPct" fill="#9b59b6" name="VRAM máx (%)" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                );
+              })()}
 
               <div className="card">
                 <div className="card-header">📋 Detailed Results</div>

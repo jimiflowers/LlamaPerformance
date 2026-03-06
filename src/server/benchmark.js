@@ -1,9 +1,25 @@
 import { performance } from 'perf_hooks';
 import si from 'systeminformation';
 import { v4 as uuidv4 } from 'uuid';
+import axios from 'axios';
 import logger, { createBenchmarkLogger } from './logger.js';
 import storage from './storage.js';
 import orchestrator from './orchestrator.js';
+
+async function getGpuMetrics() {
+  try {
+    const res = await axios.get('http://aion.home.lan:9999/gpu', { timeout: 3000 });
+    const data = res.data;
+    const card = Object.values(data).find(v => v['VRAM Total Used Memory (B)'] !== undefined);
+    return {
+      vram_used_mb: Math.round(parseInt(card['VRAM Total Used Memory (B)']) / 1024 / 1024),
+      vram_total_mb: Math.round(parseInt(card['VRAM Total Memory (B)']) / 1024 / 1024),
+      gpu_use_pct: parseInt(card['GPU use (%)'] ?? 0)
+    };
+  } catch {
+    return { vram_used_mb: null, vram_total_mb: null, gpu_use_pct: null };
+  }
+}
 
 class BenchmarkEngine {
   constructor() {
@@ -215,9 +231,9 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
         progressCallback({ modelId, scenario: scenario.name, iteration: i + 1, total: config.iterations });
       }
 
-      const resourcesBefore = await this.collectResourceMetrics();
+      const [resourcesBefore, gpuBefore] = await Promise.all([this.collectResourceMetrics(), getGpuMetrics()]);
       const inferenceResult = await this.runSingleInference(modelInfo, scenario, config);
-      const resourcesAfter = await this.collectResourceMetrics();
+      const [resourcesAfter, gpuAfter] = await Promise.all([this.collectResourceMetrics(), getGpuMetrics()]);
 
       const userM = inferenceResult.userMetrics;
       const sysM = inferenceResult.systemMetrics;
@@ -256,7 +272,14 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
         }
       }
 
-      results.resourceSnapshots.push({ before: resourcesBefore, after: resourcesAfter });
+      results.resourceSnapshots.push({
+        before: resourcesBefore,
+        after: resourcesAfter,
+        gpu_vram_before_mb: gpuBefore.vram_used_mb,
+        gpu_vram_after_mb: gpuAfter.vram_used_mb,
+        gpu_vram_total_mb: gpuAfter.vram_total_mb,
+        gpu_use_pct: gpuAfter.gpu_use_pct
+      });
       await new Promise(resolve => setTimeout(resolve, 100));
     }
 
@@ -286,8 +309,13 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
     
     const avgGpu = results.resourceSnapshots
       .filter(r => r.after.gpu !== null)
-      .reduce((sum, r) => sum + r.after.gpu, 0) / 
+      .reduce((sum, r) => sum + r.after.gpu, 0) /
       results.resourceSnapshots.filter(r => r.after.gpu !== null).length || null;
+
+    const snapshots = results.resourceSnapshots;
+    const vramValues = snapshots.map(s => s.gpu_vram_after_mb).filter(v => v !== null);
+    const vramMax = vramValues.length > 0 ? Math.max(...vramValues) : null;
+    const vramTotal = snapshots[0]?.gpu_vram_total_mb ?? null;
 
     const aggregated = {
       tps,
@@ -302,6 +330,10 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
       cpu_avg: avgCpu,
       ram_avg: avgRam,
       gpu_avg: avgGpu,
+      vram_max_mb: vramMax,
+      vram_total_mb: vramTotal,
+      vram_pct: vramMax !== null && vramTotal ? +((vramMax / vramTotal) * 100).toFixed(1) : null,
+      gpu_use_avg: snapshots.length > 0 ? +(snapshots.reduce((a, s) => a + (s.gpu_use_pct || 0), 0) / snapshots.length).toFixed(1) : null,
       total_tokens: totalTokens,
       total_iterations: config.iterations,
       successful_iterations: config.iterations - results.errors - results.timeouts,
