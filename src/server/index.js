@@ -659,6 +659,21 @@ app.post('/api/settings/ssh-scan', (req, res) => {
     existing = inv.map(m => m.id);
   } catch { existing = []; }
 
+  // Si llama-swap está disponible, leer modelos directamente de /v1/models
+  try {
+    const modelsRes = await axios.get(`${s.llamaApiUrl}/v1/models`, { timeout: 5000 });
+    const swapModels = modelsRes.data?.data || [];
+    if (swapModels.length > 0) {
+      const result = swapModels.map(m => ({
+        id: m.id,
+        alias: m.id.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+        mmproj: null,
+        isNew: !existing.includes(m.id)
+      }));
+      return res.json({ models: result, mmprojs: [] });
+    }
+  } catch { /* si falla, continúa con el flujo SSH original */ }
+
   const buildResult = (filenames) => {
     const all = filenames.filter(f => f.endsWith('.gguf'));
     const mmprojs = all.filter(f => f.toLowerCase().includes('mmproj'));
