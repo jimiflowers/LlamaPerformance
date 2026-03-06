@@ -382,17 +382,15 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
             }
           }
 
-          // Health check
-          let health = await orchestrator.checkModelHealth(modelInfo.alias || model.alias || model.model_id);
-          if (!health.healthy) {
-            benchmarkLogger.warn('Model unhealthy, retrying load', { modelId, alias: modelInfo.alias, health });
-            try {
-              // Use model_id first (contains device-specific variant)
-              await orchestrator.loadModel(modelId, model.model_id || model.alias, null, loadParams);
-              health = await orchestrator.checkModelHealth(modelInfo.alias || model.alias || model.model_id);
-            } catch (err) {
-              benchmarkLogger.error('Reload failed', { modelId, error: err.message });
-            }
+          // Health check — retry loop up to 60s (covers slow models like Gemma-3-12B)
+          let health = { healthy: false };
+          const healthDeadline = Date.now() + 60000;
+          const healthAlias = modelInfo.alias || model.alias || model.model_id;
+          while (Date.now() < healthDeadline) {
+            health = await orchestrator.checkModelHealth(healthAlias);
+            if (health.healthy) break;
+            benchmarkLogger.info('Model not ready yet, retrying health check', { modelId, alias: healthAlias, status: health.status });
+            await new Promise(r => setTimeout(r, 3000));
           }
 
           if (!health.healthy) {

@@ -184,7 +184,7 @@ class LlamaOrchestrator {
         const res = await axios.get(`${this.llamaHost}/health`, { timeout: 5000 });
         return { healthy: res.status === 200, status: 'running' };
       }
-      const res = await axios.get(`${this.llamaHost}/upstream/${modelName}`, { timeout: 5000 });
+      const res = await axios.get(`${this.llamaHost}/upstream/${modelName}`, { timeout: 30000, maxRedirects: 5 });
       const isRunning = res.data?.status === 'running';
       return {
         healthy: isRunning,
