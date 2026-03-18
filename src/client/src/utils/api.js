@@ -68,4 +68,10 @@ export const cacheAPI = {
   }
 };
 
+// RAG API
+export const ragAPI = {
+  ingest: (suiteName, skipIngest = false) =>
+    api.post('/rag/ingest', { suiteName, skipIngest }, { timeout: 300000 })
+};
+
 export default api;

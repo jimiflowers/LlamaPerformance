@@ -236,7 +236,11 @@ Get a specific run with its results.
       "system_latency_p50": 740,
       "concurrent_slots": 2,
       "lastResponse": "Hello! How can I assist you today?...",
-      "lastSystemResponse": "{\"role\": \"profesor\", \"confidence\": 0.95}"
+      "lastSystemResponse": "{\"role\": \"profesor\", \"confidence\": 0.95}",
+      "ragChunks": [
+        { "text": "El concepto principal es...", "score": 0.9231 }
+      ],
+      "ragRetrievalMs": 87
     }
   ]
 }
@@ -253,8 +257,10 @@ Get a specific run with its results.
 | `system_ttft` | Median TTFT of the system slot (ms). `null` for legacy suites |
 | `system_latency_p50` | P50 latency of the system slot (ms). `null` for legacy suites |
 | `concurrent_slots` | `2` for dual-prompt suites, `1` for legacy |
+| `ragChunks` | Array of `{ text, score }` objects retrieved from Qdrant for this scenario. `null` for non-RAG suites |
+| `ragRetrievalMs` | Time taken for the Qdrant vector search (ms). `null` for non-RAG suites |
 
-`raw_data` itself is not returned. All response and VRAM fields are extracted from it server-side.
+`raw_data` itself is not returned. All response, VRAM, and RAG fields are extracted from it server-side.
 
 ### GET /benchmarks/runs/:id/status
 Poll status of an in-progress benchmark run.
@@ -290,6 +296,40 @@ Get log entries for a benchmark run. Query param: `limit` (default 100).
 
 ### GET /benchmarks/results
 Get all results. Query params: `runId`, `modelId` (both optional).
+
+---
+
+## RAG
+
+### POST /rag/ingest
+
+Ingest a PDF into Qdrant for use with a RAG benchmark suite.
+
+**Body:** `{ "suiteName": "profesor_alia", "skipIngest": false }`
+
+- `suiteName` — name of a suite file in `benchmarks/suites/` that contains a `rag` block with `source_pdf`, `embeddings_endpoint`, `qdrant_endpoint`, `collection`, etc.
+- `skipIngest` — if `true`, skips PDF parsing and embedding; returns immediately confirming the existing Qdrant collection will be used as-is.
+
+**Success response (full ingest):**
+```json
+{
+  "success": true,
+  "chunks": 148,
+  "vectorDim": 768,
+  "pdfName": "material-del-curso.pdf",
+  "pages": 32
+}
+```
+
+**Success response (skipIngest: true):**
+```json
+{
+  "success": true,
+  "skipped": true
+}
+```
+
+This endpoint has a 5-minute timeout (`timeout: 300000`) on the client side. The operation is synchronous — progress is logged server-side via Winston.
 
 ---
 

@@ -149,12 +149,17 @@ function Results() {
     const scenarios = [...new Set(results.map(r => r.scenario))];
     const models = [...new Set(results.map(r => r.model_alias || r.model_id))];
     const lookup = {};
+    const ragByScenario = {};
     results.forEach(r => {
       const mk = r.model_alias || r.model_id;
       if (!lookup[r.scenario]) lookup[r.scenario] = {};
       lookup[r.scenario][mk] = { user: r.lastResponse ?? null, system: r.lastSystemResponse ?? null };
+      // RAG chunks are per-scenario (same for all models) — keep first occurrence
+      if (r.ragChunks && !ragByScenario[r.scenario]) {
+        ragByScenario[r.scenario] = { chunks: r.ragChunks, latencyMs: r.ragRetrievalMs ?? null };
+      }
     });
-    return { scenarios, models, lookup };
+    return { scenarios, models, lookup, ragByScenario };
   };
 
   // Aggregate results by model for comparison
@@ -758,10 +763,12 @@ function Results() {
 
               {/* Response cross-table: scenarios × models */}
               {(() => {
-                const { scenarios, models, lookup } = getResponseMatrix();
+                const { scenarios, models, lookup, ragByScenario } = getResponseMatrix();
                 const hasAnyResponse = results.some(r => r.lastResponse || r.lastSystemResponse);
                 if (!hasAnyResponse) return null;
+                const hasRagChunks = Object.keys(ragByScenario).length > 0;
                 return (
+                  <>
                   <div className="card">
                     <div className="card-header">💬 Model Responses</div>
                     <p style={{ padding: '0.5rem 1rem 0', color: '#7f8c8d', fontSize: '0.85rem' }}>
@@ -852,6 +859,48 @@ function Results() {
                       </table>
                     </div>
                   </div>
+                  {hasRagChunks && (
+                    <div className="card" style={{ marginTop: '1rem' }}>
+                      <div className="card-header">🔍 RAG — Contexto Recuperado</div>
+                      <p style={{ padding: '0.5rem 1rem 0', color: '#7f8c8d', fontSize: '0.85rem' }}>
+                        Fragmentos del documento recuperados por Qdrant para cada escenario.
+                      </p>
+                      {scenarios.filter(s => ragByScenario[s]).map((scenario, si) => {
+                        const { chunks, latencyMs } = ragByScenario[scenario];
+                        return (
+                          <div key={si} style={{ padding: '0.75rem 1rem', borderTop: si > 0 ? '1px solid #dee2e6' : undefined }}>
+                            <div style={{ fontWeight: 600, marginBottom: '0.4rem', fontSize: '0.9rem' }}>
+                              {scenario}
+                              {latencyMs != null && (
+                                <span style={{ marginLeft: '0.75rem', fontSize: '0.75rem', color: '#7f8c8d', fontWeight: 400 }}>
+                                  retrieval: {latencyMs}ms
+                                </span>
+                              )}
+                            </div>
+                            {chunks.map((chunk, ci) => (
+                              <div key={ci} style={{
+                                marginBottom: '0.5rem',
+                                padding: '0.5rem 0.75rem',
+                                background: '#f8f9fa',
+                                borderRadius: '4px',
+                                borderLeft: '3px solid #0c5460',
+                                fontSize: '0.82rem',
+                                color: '#2c3e50',
+                                whiteSpace: 'pre-wrap',
+                                wordBreak: 'break-word'
+                              }}>
+                                <span style={{ fontSize: '0.72rem', color: '#7f8c8d', display: 'block', marginBottom: '4px' }}>
+                                  Chunk {ci + 1}{chunk.score != null ? ` · score: ${chunk.score.toFixed(4)}` : ''}
+                                </span>
+                                {chunk.text || chunk}
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                  </>
                 );
               })()}
             </>

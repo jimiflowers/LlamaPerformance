@@ -98,12 +98,18 @@ class BenchmarkEngine {
     const client = orchestrator.getOpenAIClient();
     const modelName = (modelInfo.id || '').replace(/\.gguf$/i, '');
 
-    // Determinar prompts: soporte para suites duales (prompt_system + prompt_user) y suites legacy (prompt)
-    const hasPromptPair = scenario.prompt_system && scenario.prompt_user;
+    // Modo RAG: messages pre-ensamblados por ragEngine.assembleMessages
+    const hasRagMessages = Array.isArray(scenario._ragMessages);
+    // Suites duales (prompt_system + prompt_user) y suites legacy (prompt)
+    const hasPromptPair = !hasRagMessages && scenario.prompt_system && scenario.prompt_user;
     const systemPrompt = hasPromptPair ? scenario.prompt_system : null;
     const userPrompt = hasPromptPair ? scenario.prompt_user : scenario.prompt;
 
-    const runSlot = async (prompt, slotType) => {
+    const runSlot = async (promptOrMessages, slotType) => {
+      // Acepta string prompt o array de messages pre-ensamblados (RAG)
+      const messages = Array.isArray(promptOrMessages)
+        ? promptOrMessages
+        : [{ role: 'user', content: promptOrMessages }];
       const metrics = {
         slotType,
         startTime: performance.now(),
@@ -128,7 +134,7 @@ class BenchmarkEngine {
 
         const stream = await client.chat.completions.create({
           model: modelName,
-          messages: [{ role: 'user', content: prompt }],
+          messages,
           max_tokens: scenario.max_tokens || 128,
           temperature: slotType === 'system'
             ? (config.temperature_system ?? 0.1)
@@ -169,7 +175,11 @@ class BenchmarkEngine {
       return metrics;
     };
 
-    if (hasPromptPair) {
+    if (hasRagMessages) {
+      // Modo RAG: slot único con messages pre-ensamblados (system+context+user)
+      const metrics = await runSlot(scenario._ragMessages, 'user');
+      return { systemMetrics: null, userMetrics: metrics, concurrent: false };
+    } else if (hasPromptPair) {
       // Lanzar ambos slots concurrentemente — simula parallel=2
       const [systemMetrics, userMetrics] = await Promise.all([
         runSlot(systemPrompt, 'system'),
@@ -468,6 +478,18 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
           }
         };
 
+        // Inicializar RAG engine si la suite tiene config RAG
+        let ragEngine = null;
+        if (suite.rag) {
+          const { RagEngine } = await import('./rag/ragEngine.js');
+          ragEngine = new RagEngine(suite.rag);
+          benchmarkLogger.info('RAG mode activado', {
+            collection: suite.rag.collection,
+            topK: suite.rag.top_k,
+            embeddingsModel: suite.rag.embeddings_model
+          });
+        }
+
         // Run benchmarks for each model sequentially
         for (let i = 0; i < modelIds.length; i++) {
           const modelId = modelIds[i];
@@ -526,12 +548,46 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
           // Run each scenario in the suite
           for (const scenario of suite.scenarios) {
             try {
+              // Modo RAG: recuperar contexto antes de la inferencia
+              let augScenario = scenario;
+              let ragResult = null;
+              if (ragEngine && scenario.question) {
+                try {
+                  ragResult = await ragEngine.retrieve(scenario.question);
+                  const messages = ragEngine.assembleMessages(
+                    suite.system_prompt || '',
+                    ragResult.chunks,
+                    scenario.question
+                  );
+                  augScenario = { ...scenario, _ragMessages: messages };
+                  benchmarkLogger.info(`RAG: ${ragResult.chunks.length} chunks en ${ragResult.latencyMs}ms`, {
+                    scenario: scenario.name
+                  });
+                } catch (ragErr) {
+                  benchmarkLogger.error('RAG retrieval falló — ejecutando sin contexto', {
+                    scenario: scenario.name,
+                    error: ragErr.message
+                  });
+                }
+              }
+
               const result = await this.runScenario(
                 modelId,
-                scenario,
+                augScenario,
                 config,
                 progressCallback
               );
+
+              // Adjuntar chunks RAG al raw_data para auditoría
+              if (ragResult) {
+                result.raw.ragChunks = ragResult.chunks.map(c => ({
+                  score: +c.score.toFixed(4),
+                  pdf_name: c.payload.pdf_name,
+                  page: c.payload.page,
+                  text: c.payload.text.slice(0, 500)
+                }));
+                result.raw.ragRetrievalMs = ragResult.latencyMs;
+              }
 
               // Save result
               const resultRecord = {

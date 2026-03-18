@@ -13,6 +13,7 @@ import settingsManager from './settingsManager.js';
 import { Client as SshClient } from 'ssh2';
 import os from 'os';
 import axios from 'axios';
+import { ingestPdf } from './rag/ingest.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -242,13 +243,17 @@ app.get('/api/benchmarks/runs/:id', async (req, res) => {
     const results = storage.getBenchmarkResults(req.params.id).map(r => {
       let lastResponse = null;
       let lastSystemResponse = null;
+      let ragChunks = null;
+      let ragRetrievalMs = null;
       try {
         const rd = typeof r.raw_data === 'string' ? JSON.parse(r.raw_data) : r.raw_data;
         lastResponse = rd?.lastResponse ?? null;
         lastSystemResponse = rd?.lastSystemResponse ?? null;
+        ragChunks = rd?.ragChunks ?? null;
+        ragRetrievalMs = rd?.ragRetrievalMs ?? null;
       } catch {}
       const { raw_data, ...rest } = r;
-      return { ...rest, lastResponse, lastSystemResponse };
+      return { ...rest, lastResponse, lastSystemResponse, ragChunks, ragRetrievalMs };
     });
     res.json({ run, results });
   } catch (error) { res.status(500).json({ error: error.message }); }
@@ -642,6 +647,37 @@ app.put('/api/settings', async (req, res) => {
       restartRequired: portChanged
     });
   } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+/**
+ * POST /api/rag/ingest
+ * Ingesta un PDF en Qdrant usando la config RAG de la suite indicada.
+ * Body: { suiteName, skipIngest? }
+ */
+app.post('/api/rag/ingest', async (req, res) => {
+  try {
+    const { suiteName, skipIngest = false } = req.body;
+    if (!suiteName) return res.status(400).json({ error: 'suiteName requerido' });
+    if (skipIngest) return res.json({ skipped: true, message: 'Ingesta omitida — colección ya preparada' });
+
+    const suiteFile = path.join(__dirname, '../../benchmarks/suites', `${suiteName}.json`);
+    if (!fs.existsSync(suiteFile)) return res.status(404).json({ error: `Suite "${suiteName}" no encontrada` });
+
+    const suite = JSON.parse(fs.readFileSync(suiteFile, 'utf8'));
+    if (!suite.rag) return res.status(400).json({ error: 'La suite no tiene configuración RAG' });
+    if (!suite.rag.source_pdf) return res.status(400).json({ error: 'suite.rag.source_pdf no está configurado' });
+
+    const progressLog = [];
+    const result = await ingestPdf(suite.rag.source_pdf, suite.rag, (p) => {
+      progressLog.push(p);
+      logger.info(`RAG ingest: ${p.message}`);
+    });
+
+    res.json({ success: true, ...result, progress: progressLog });
+  } catch (err) {
+    logger.error('RAG ingest error', { error: err.message });
+    res.status(500).json({ error: err.message });
+  }
 });
 
 /**

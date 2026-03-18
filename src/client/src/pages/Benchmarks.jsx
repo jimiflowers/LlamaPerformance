@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { modelsAPI, benchmarksAPI } from '../utils/api';
+import { modelsAPI, benchmarksAPI, ragAPI } from '../utils/api';
 
 function Benchmarks() {
   const [models, setModels] = useState([]);
@@ -18,6 +18,8 @@ function Benchmarks() {
     temperature_user: 0.7,
     streaming: true
   });
+  const [ragLoading, setRagLoading] = useState(false);
+  const [ragStatus, setRagStatus] = useState(null); // { success, message, chunks, pages }
   const [loading, setLoading] = useState(false);
   const [modelsLoading, setModelsLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -212,6 +214,27 @@ function Benchmarks() {
     }
   };
 
+  const handleIngest = async (skipIngest = false) => {
+    if (!selectedSuite) return;
+    setRagLoading(true);
+    setRagStatus(null);
+    try {
+      const res = await ragAPI.ingest(selectedSuite, skipIngest);
+      if (res.data.skipped) {
+        setRagStatus({ success: true, message: 'Ingesta omitida — usando colección existente.' });
+      } else {
+        setRagStatus({
+          success: true,
+          message: `PDF ingested: ${res.data.pdfName} — ${res.data.chunks} chunks, ${res.data.pages} págs, dim=${res.data.vectorDim}`
+        });
+      }
+    } catch (err) {
+      setRagStatus({ success: false, message: err.response?.data?.error || err.message });
+    } finally {
+      setRagLoading(false);
+    }
+  };
+
   const currentSuite = suites.find(s => s.name === selectedSuite);
 
   return (
@@ -383,6 +406,7 @@ function Benchmarks() {
           </div>
 
           {currentSuite && (
+            <>
             <div style={{ marginTop: '1rem', padding: '1rem', background: '#f8f9fa', borderRadius: '4px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
                 <h4 style={{ marginBottom: 0 }}>Suite Details</h4>
@@ -406,6 +430,19 @@ function Benchmarks() {
               </div>
               <p style={{ marginBottom: '0.5rem', color: '#7f8c8d' }}>
                 {currentSuite.description}
+                {currentSuite.rag && (
+                  <span style={{
+                    marginLeft: '0.75rem',
+                    padding: '2px 8px',
+                    borderRadius: '4px',
+                    background: '#d1ecf1',
+                    color: '#0c5460',
+                    fontSize: '0.75rem',
+                    fontWeight: 700
+                  }}>
+                    RAG
+                  </span>
+                )}
               </p>
               <p style={{ marginBottom: '1rem' }}>
                 <strong>Available Scenarios:</strong> {currentSuite.scenarios?.length || 0} | 
@@ -455,7 +492,14 @@ function Benchmarks() {
                         <div style={{ fontSize: '0.85rem', color: '#7f8c8d', marginBottom: '0.25rem' }}>
                           {scenario.description}
                         </div>
-                        {scenario.prompt_system && scenario.prompt_user ? (
+                        {scenario.question ? (
+                          <div style={{ fontSize: '0.8rem', color: '#95a5a6' }}>
+                            <span style={{ fontWeight: 600, color: '#0c5460' }}>pregunta: </span>
+                            <span style={{ fontStyle: 'italic' }}>
+                              "{scenario.question.substring(0, 100)}{scenario.question.length > 100 ? '...' : ''}"
+                            </span>
+                          </div>
+                        ) : scenario.prompt_system && scenario.prompt_user ? (
                           <>
                             <div style={{ fontSize: '0.8rem', color: '#95a5a6', marginBottom: '0.15rem' }}>
                               <span style={{ fontWeight: 600, color: '#7f8c8d' }}>system: </span>
@@ -484,6 +528,52 @@ function Benchmarks() {
                 </div>
               )}
             </div>
+
+            {currentSuite.rag && (
+              <div style={{ marginTop: '1rem', padding: '1rem', background: '#e8f4f8', borderRadius: '4px', borderLeft: '4px solid #0c5460' }}>
+                <div style={{ fontWeight: 700, color: '#0c5460', marginBottom: '0.5rem' }}>
+                  RAG — Ingesta de PDF
+                </div>
+                <div style={{ fontSize: '0.85rem', color: '#555', marginBottom: '0.75rem' }}>
+                  Colección: <strong>{currentSuite.rag.collection}</strong> &nbsp;·&nbsp;
+                  top_k: <strong>{currentSuite.rag.top_k}</strong> &nbsp;·&nbsp;
+                  chunk_size: <strong>{currentSuite.rag.chunk_size}</strong> tokens &nbsp;·&nbsp;
+                  PDF: <code style={{ fontSize: '0.8rem' }}>{currentSuite.rag.source_pdf}</code>
+                </div>
+                {ragStatus && (
+                  <div style={{
+                    marginBottom: '0.75rem',
+                    padding: '0.5rem 0.75rem',
+                    borderRadius: '4px',
+                    background: ragStatus.success ? '#d4edda' : '#f8d7da',
+                    color: ragStatus.success ? '#155724' : '#721c24',
+                    fontSize: '0.85rem'
+                  }}>
+                    {ragStatus.message}
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    style={{ background: '#0c5460', color: 'white' }}
+                    onClick={() => handleIngest(false)}
+                    disabled={ragLoading}
+                  >
+                    {ragLoading ? 'Ingesting...' : 'Ingest PDF'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-secondary"
+                    onClick={() => handleIngest(true)}
+                    disabled={ragLoading}
+                  >
+                    Skip (usar colección existente)
+                  </button>
+                </div>
+              </div>
+            )}
+            </>
           )}
         </div>
 

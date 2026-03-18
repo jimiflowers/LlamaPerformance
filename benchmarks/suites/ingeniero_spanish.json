@@ -1,0 +1,82 @@
+{
+  "name": "ingeniero_spanish",
+  "description": "Suite de benchmark para candidatos al rol Ingeniero. Escenarios en pares concurrentes: slot_system simula al orquestador con JSON, slot_user simula al usuario con lenguaje natural. Evalúa generación de código, debugging, infraestructura y razonamiento técnico.",
+  "version": "1.0.0",
+  "concurrent_slots": 2,
+  "system_prompt": "Eres un ingeniero de sistemas e infraestructura con experiencia en programación, contenedores, redes y administración se S.O. Windows y Linux. Tu función es generar código funcional y seguro, diagnosticar problemas técnicos, diseñar soluciones de infraestructura y revisar código ajeno. Responde siempre en el idioma en que te pregunten. Cuando generes código, prioriza la corrección, la robustez y las buenas prácticas sobre la brevedad. Cuando diagnostiques problemas, razona a partir de los síntomas y la evidencia antes de proponer soluciones. No inventes datos ni métricas que no se te hayan proporcionado.",
+  "scenarios": [
+    {
+      "name": "Generación de Código",
+      "description": "Producir código funcional a partir de una especificación estructurada",
+      "prompt_system": "{\"action\": \"generate_code\", \"language\": \"python\", \"spec\": \"función que reciba una lista de diccionarios con claves 'host' y 'port', compruebe conectividad TCP con timeout de 2 segundos, y devuelva un dict con host:port como clave y bool como valor\", \"constraints\": [\"stdlib only\", \"type hints\", \"docstring\"], \"response_format\": \"json\", \"fields\": [\"code\", \"dependencies\", \"usage_example\"]}",
+      "prompt_user": "Necesito una función en Python que reciba una lista de hosts con sus puertos y compruebe si están accesibles por TCP, con un timeout de 2 segundos. Solo librería estándar, con type hints y docstring.",
+      "max_tokens": 500,
+      "expected_output_length": "long"
+    },
+    {
+      "name": "Debugging y Corrección",
+      "description": "Identificar y corregir errores en código existente",
+      "prompt_system": "{\"action\": \"debug\", \"language\": \"python\", \"code\": \"import json\\ndef parse_config(path):\\n    with open(path) as f:\\n        data = json.load(f)\\n    port = data['server']['port']\\n    host = data['server']['host']\\n    return f'http://{host}:{port}'\\n\\nurl = parse_config('/etc/app/config.json')\\nprint(url)\", \"error\": \"KeyError: 'server' en algunos entornos; además el servicio a veces usa HTTPS\", \"response_format\": \"json\", \"fields\": [\"bugs_found\", \"corrected_code\", \"explanation\"]}",
+      "prompt_user": "Tengo este script en Python que lee un config.json y arma la URL del servicio, pero a veces peta con KeyError: 'server' y además no contempla que el servicio puede ser HTTPS. ¿Puedes encontrar los fallos y corregirlo?\n\nimport json\ndef parse_config(path):\n    with open(path) as f:\n        data = json.load(f)\n    port = data['server']['port']\n    host = data['server']['host']\n    return f'http://{host}:{port}'\n\nurl = parse_config('/etc/app/config.json')\nprint(url)",
+      "max_tokens": 400,
+      "expected_output_length": "long"
+    },
+    {
+      "name": "Consulta SQL Compleja",
+      "description": "Traducir requisito de negocio a query SQL correcta y optimizada",
+      "prompt_system": "{\"action\": \"generate_sql\", \"dialect\": \"postgresql\", \"schema\": {\"users\": [\"id SERIAL PK\", \"name TEXT\", \"created_at TIMESTAMPTZ\"], \"orders\": [\"id SERIAL PK\", \"user_id INT FK(users.id)\", \"total NUMERIC(10,2)\", \"status TEXT\", \"created_at TIMESTAMPTZ\"]}, \"requirement\": \"top 5 usuarios por gasto total en los últimos 90 días, solo pedidos completados, incluyendo número de pedidos y ticket medio\", \"response_format\": \"json\", \"fields\": [\"query\", \"explanation\"]}",
+      "prompt_user": "Tengo una tabla users (id, name, created_at) y orders (id, user_id, total, status, created_at) en PostgreSQL. Dame la query para sacar los 5 usuarios que más han gastado en los últimos 90 días contando solo pedidos con status 'completed'. Quiero ver también cuántos pedidos hicieron y su ticket medio.",
+      "max_tokens": 350,
+      "expected_output_length": "medium"
+    },
+    {
+      "name": "Dockerfile y Compose",
+      "description": "Generar configuración de contenedores a partir de requisitos de despliegue",
+      "prompt_system": "{\"action\": \"generate_infra\", \"type\": \"docker-compose\", \"spec\": {\"service\": \"FastAPI app\", \"python_version\": \"3.12\", \"dependencies\": [\"fastapi\", \"uvicorn\", \"sqlalchemy\", \"asyncpg\"], \"database\": \"postgres:16\", \"requirements\": [\"healthcheck\", \"volumen persistente para DB\", \"red interna\", \"restart policy\"]}, \"response_format\": \"json\", \"fields\": [\"dockerfile\", \"compose_yaml\", \"notes\"]}",
+      "prompt_user": "Necesito un Dockerfile y un docker-compose.yml para una app FastAPI con Python 3.12 que usa PostgreSQL 16. Dependencias: fastapi, uvicorn, sqlalchemy, asyncpg. Quiero healthcheck, volumen persistente para la base de datos, red interna y que se reinicie si cae.",
+      "max_tokens": 600,
+      "expected_output_length": "long"
+    },
+    {
+      "name": "Code Review",
+      "description": "Analizar código ajeno identificando problemas de seguridad, rendimiento y estilo",
+      "prompt_system": "{\"action\": \"review\", \"language\": \"python\", \"code\": \"from flask import Flask, request\\nimport sqlite3, os\\n\\napp = Flask(__name__)\\nDB = os.getenv('DB_PATH', 'app.db')\\n\\n@app.route('/user')\\ndef get_user():\\n    uid = request.args.get('id')\\n    conn = sqlite3.connect(DB)\\n    cur = conn.cursor()\\n    cur.execute(f\\\"SELECT * FROM users WHERE id = {uid}\\\")\\n    row = cur.fetchone()\\n    conn.close()\\n    return {'user': row}\\n\\napp.run(debug=True, host='0.0.0.0')\", \"review_focus\": [\"security\", \"performance\", \"best_practices\"], \"response_format\": \"json\", \"fields\": [\"issues\", \"severity\", \"recommendations\"]}",
+      "prompt_user": "Revísame este endpoint Flask y dime qué problemas tiene a nivel de seguridad, rendimiento y buenas prácticas:\n\nfrom flask import Flask, request\nimport sqlite3, os\n\napp = Flask(__name__)\nDB = os.getenv('DB_PATH', 'app.db')\n\n@app.route('/user')\ndef get_user():\n    uid = request.args.get('id')\n    conn = sqlite3.connect(DB)\n    cur = conn.cursor()\n    cur.execute(f\"SELECT * FROM users WHERE id = {uid}\")\n    row = cur.fetchone()\n    conn.close()\n    return {'user': row}\n\napp.run(debug=True, host='0.0.0.0')",
+      "max_tokens": 400,
+      "expected_output_length": "long"
+    },
+    {
+      "name": "Diseño de API REST",
+      "description": "Definir endpoints y contratos de una API a partir de requisitos funcionales",
+      "prompt_system": "{\"action\": \"design_api\", \"domain\": \"sistema de inventario\", \"entities\": [\"product\", \"category\", \"stock_movement\"], \"requirements\": [\"CRUD de productos con paginación\", \"filtro por categoría\", \"registro de entradas y salidas de stock\", \"consulta de stock actual\"], \"response_format\": \"json\", \"fields\": [\"endpoints\", \"request_body_examples\", \"response_examples\"]}",
+      "prompt_user": "Diseña los endpoints REST para un sistema de inventario. Tengo productos, categorías y movimientos de stock. Necesito CRUD de productos con paginación, filtrar por categoría, registrar entradas y salidas de stock, y poder consultar el stock actual de un producto.",
+      "max_tokens": 500,
+      "expected_output_length": "long"
+    },
+    {
+      "name": "Diagnóstico de Infraestructura",
+      "description": "Razonar sobre un problema de infra a partir de síntomas y logs",
+      "prompt_system": "{\"action\": \"diagnose\", \"context\": {\"service\": \"nginx reverse proxy\", \"symptom\": \"502 Bad Gateway intermitente\", \"infra\": \"docker-compose con nginx + 3 réplicas app node:20\", \"logs_nginx\": \"upstream prematurely closed connection while reading response header\", \"logs_app\": \"FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory\", \"metrics\": {\"memory_app_containers\": \"950Mi/1Gi\", \"cpu\": \"12%\"}}, \"response_format\": \"json\", \"fields\": [\"root_cause\", \"evidence\", \"fix_steps\", \"prevention\"]}",
+      "prompt_user": "Tengo un nginx como reverse proxy delante de 3 contenedores Node.js y me da 502 intermitentes. En los logs de nginx veo 'upstream prematurely closed connection while reading response header' y en los de la app 'JavaScript heap out of memory'. Los contenedores están a 950Mi de 1Gi de RAM y CPU al 12%. ¿Qué pasa y cómo lo arreglo?",
+      "max_tokens": 400,
+      "expected_output_length": "long"
+    },
+    {
+      "name": "Script Bash para Operaciones",
+      "description": "Generar un script de automatización operativa correcto y seguro",
+      "prompt_system": "{\"action\": \"generate_code\", \"language\": \"bash\", \"spec\": \"script que reciba un directorio como argumento, busque ficheros .log de más de 7 días, los comprima con gzip manteniendo la estructura de subdirectorios en un tar.gz con fecha en el nombre, y borre los originales solo si el tar se creó correctamente\", \"constraints\": [\"set -euo pipefail\", \"validar argumento\", \"logging a stderr\"], \"response_format\": \"json\", \"fields\": [\"script\", \"usage\"]}",
+      "prompt_user": "Hazme un script en bash que reciba un directorio, busque todos los .log con más de 7 días de antigüedad, los meta en un tar.gz con la fecha en el nombre manteniendo la estructura de carpetas, y solo borre los originales si el tar se generó bien. Quiero que sea robusto: set -euo pipefail, validación de argumentos y logging a stderr.",
+      "max_tokens": 500,
+      "expected_output_length": "long"
+    }
+  ],
+  "default_config": {
+    "iterations": 3,
+    "concurrency": 2,
+    "timeout": 90000,
+    "temperature": 0.3,
+    "temperature_system": 0.1,
+    "temperature_user": 0.3,
+    "streaming": true
+  }
+}
