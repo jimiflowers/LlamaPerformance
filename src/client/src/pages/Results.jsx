@@ -713,50 +713,104 @@ function Results() {
                     </tr>
                   </thead>
                   <tbody>
-                    {results.map((result, idx) => (
-                      <tr key={idx}>
-                        <td><strong>{result.model_alias || result.model_id}</strong></td>
-                        <td>
-                          <span style={{
-                            display: 'inline-block',
-                            padding: '2px 8px',
-                            borderRadius: '4px',
-                            background: '#ecf0f1',
-                            fontSize: '0.85rem'
-                          }}>
-                            {result.scenario}
-                          </span>
-                        </td>
-                        <td>
-                          <span style={{ fontWeight: 'bold', color: '#27ae60' }}>
-                            {result.tps?.toFixed(2) || '-'}
-                          </span>
-                        </td>
-                        <td>{result.ttft?.toFixed(0) || '-'}</td>
-                        <td>{result.tpot?.toFixed(2) || '-'}</td>
-                        <td>
-                          <span style={{ fontWeight: 'bold', color: '#e67e22' }}>
-                            {result.gen_tps?.toFixed(2) || '-'}
-                          </span>
-                        </td>
-                        <td>{result.latency_p50?.toFixed(0) || '-'}</td>
-                        <td>{result.latency_p95?.toFixed(0) || '-'}</td>
-                        <td>{result.latency_p99?.toFixed(0) || '-'}</td>
-                        <td>
-                          <span style={{
-                            display: 'inline-block',
-                            padding: '2px 8px',
-                            borderRadius: '4px',
-                            fontWeight: 'bold',
-                            background: (result.error_rate || 0) > 5 ? '#e74c3c' : '#27ae60',
-                            color: 'white',
-                            fontSize: '0.85rem'
-                          }}>
-                            {result.error_rate?.toFixed(1) || '0'}%
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
+                    {results.map((result, idx) => {
+                      const isDual = result.concurrent_slots === 2;
+                      return (
+                        <React.Fragment key={idx}>
+                          <tr>
+                            <td><strong>{result.model_alias || result.model_id}</strong></td>
+                            <td>
+                              <span style={{
+                                display: 'inline-block',
+                                padding: '2px 8px',
+                                borderRadius: '4px',
+                                background: '#ecf0f1',
+                                fontSize: '0.85rem'
+                              }}>
+                                {result.scenario}
+                              </span>
+                              {isDual && (
+                                <span style={{
+                                  display: 'inline-block',
+                                  marginLeft: '6px',
+                                  padding: '1px 6px',
+                                  borderRadius: '4px',
+                                  background: '#8e44ad',
+                                  color: 'white',
+                                  fontSize: '0.72rem',
+                                  fontWeight: 'bold',
+                                  verticalAlign: 'middle'
+                                }}>2 SLOTS</span>
+                              )}
+                            </td>
+                            <td>
+                              <span style={{ fontWeight: 'bold', color: '#27ae60' }}>
+                                {result.tps?.toFixed(2) || '-'}
+                              </span>
+                            </td>
+                            <td>{result.ttft?.toFixed(0) || '-'}</td>
+                            <td>{result.tpot?.toFixed(2) || '-'}</td>
+                            <td>
+                              <span style={{ fontWeight: 'bold', color: '#e67e22' }}>
+                                {result.gen_tps?.toFixed(2) || '-'}
+                              </span>
+                            </td>
+                            <td>{result.latency_p50?.toFixed(0) || '-'}</td>
+                            <td>{result.latency_p95?.toFixed(0) || '-'}</td>
+                            <td>{result.latency_p99?.toFixed(0) || '-'}</td>
+                            <td>
+                              <span style={{
+                                display: 'inline-block',
+                                padding: '2px 8px',
+                                borderRadius: '4px',
+                                fontWeight: 'bold',
+                                background: (result.error_rate || 0) > 5 ? '#e74c3c' : '#27ae60',
+                                color: 'white',
+                                fontSize: '0.85rem'
+                              }}>
+                                {result.error_rate?.toFixed(1) || '0'}%
+                              </span>
+                            </td>
+                          </tr>
+                          {isDual && (
+                            <tr style={{ background: '#f8f4fc' }}>
+                              <td colSpan={10} style={{ padding: '0 1rem 0.75rem 2rem' }}>
+                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+                                  <thead>
+                                    <tr>
+                                      <th style={{ textAlign: 'left', padding: '4px 8px', color: '#7f8c8d', fontWeight: 600, width: '20%' }}>Slot</th>
+                                      <th style={{ padding: '4px 8px', color: '#7f8c8d', fontWeight: 600 }}>TPS</th>
+                                      <th style={{ padding: '4px 8px', color: '#7f8c8d', fontWeight: 600 }}>TTFT (ms)</th>
+                                      <th style={{ padding: '4px 8px', color: '#7f8c8d', fontWeight: 600 }}>TPOT (ms)</th>
+                                      <th style={{ padding: '4px 8px', color: '#7f8c8d', fontWeight: 600 }}>GenTPS</th>
+                                      <th style={{ padding: '4px 8px', color: '#7f8c8d', fontWeight: 600 }}>P50 (ms)</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    <tr>
+                                      <td style={{ padding: '3px 8px', fontWeight: 600, color: '#2980b9' }}>👤 User</td>
+                                      <td style={{ padding: '3px 8px', textAlign: 'center', color: '#27ae60', fontWeight: 'bold' }}>{result.tps?.toFixed(2) || '—'}</td>
+                                      <td style={{ padding: '3px 8px', textAlign: 'center' }}>{result.ttft?.toFixed(0) || '—'}</td>
+                                      <td style={{ padding: '3px 8px', textAlign: 'center' }}>{result.tpot?.toFixed(2) || '—'}</td>
+                                      <td style={{ padding: '3px 8px', textAlign: 'center', color: '#e67e22', fontWeight: 'bold' }}>{result.gen_tps?.toFixed(2) || '—'}</td>
+                                      <td style={{ padding: '3px 8px', textAlign: 'center' }}>{result.latency_p50?.toFixed(0) || '—'}</td>
+                                    </tr>
+                                    <tr>
+                                      <td style={{ padding: '3px 8px', fontWeight: 600, color: '#8e44ad' }}>⚙️ Sistema</td>
+                                      <td style={{ padding: '3px 8px', textAlign: 'center', color: '#27ae60', fontWeight: 'bold' }}>{result.system_tps?.toFixed(2) || '—'}</td>
+                                      <td style={{ padding: '3px 8px', textAlign: 'center' }}>{result.system_ttft?.toFixed(0) || '—'}</td>
+                                      <td style={{ padding: '3px 8px', textAlign: 'center' }}>{result.system_tpot?.toFixed(2) || '—'}</td>
+                                      <td style={{ padding: '3px 8px', textAlign: 'center', color: '#e67e22', fontWeight: 'bold' }}>{result.system_gen_tps?.toFixed(2) || '—'}</td>
+                                      <td style={{ padding: '3px 8px', textAlign: 'center' }}>{result.system_latency_p50?.toFixed(0) || '—'}</td>
+                                    </tr>
+                                  </tbody>
+                                </table>
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

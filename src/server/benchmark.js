@@ -287,9 +287,13 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
           if (!results.systemLatencies) results.systemLatencies = [];
           if (!results.systemTtfts) results.systemTtfts = [];
           if (!results.systemResponseTexts) results.systemResponseTexts = [];
+          if (!results.systemTokenCounts) results.systemTokenCounts = [];
+          if (!results.systemInterTokenDelays) results.systemInterTokenDelays = [];
           results.systemLatencies.push(sysM.endTime - sysM.startTime);
           if (sysM.ttft !== null) results.systemTtfts.push(sysM.ttft);
           if (sysM.interTokenDelays.length > 0) results.allInterTokenDelays.push(...sysM.interTokenDelays);
+          if (sysM.interTokenDelays.length > 0) results.systemInterTokenDelays.push(...sysM.interTokenDelays);
+          results.systemTokenCounts.push(sysM.tokens || 0);
           if (sysM.responseText) results.systemResponseTexts.push(sysM.responseText);
         }
       }
@@ -365,6 +369,15 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
       system_latency_p50: results.systemLatencies?.length > 0
         ? this.calculatePercentile([...results.systemLatencies].sort((a, b) => a - b), 50)
         : null,
+      system_tps: (() => {
+        const sysTok = results.systemTokenCounts?.reduce((s, t) => s + t, 0) ?? 0;
+        const sysTime = (results.systemLatencies?.reduce((s, t) => s + t, 0) ?? 0) / 1000;
+        return sysTime > 0 ? sysTok / sysTime : null;
+      })(),
+      system_tpot: results.systemInterTokenDelays?.length > 0
+        ? results.systemInterTokenDelays.reduce((s, t) => s + t, 0) / results.systemInterTokenDelays.length
+        : null,
+      get system_gen_tps() { return this.system_tpot > 0 ? 1000 / this.system_tpot : null; },
       concurrent_slots: results.iterations[0]?.concurrent ? 2 : 1
     };
 

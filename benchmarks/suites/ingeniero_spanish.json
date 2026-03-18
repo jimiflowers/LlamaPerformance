@@ -1,6 +1,3 @@
-chmark test ingeniero · JSON
-Copiar
-
 {
   "name": "ingeniero_spanish",
   "description": "Suite de benchmark para candidatos al rol Ingeniero. Escenarios en pares concurrentes: slot_system simula al orquestador con JSON, slot_user simula al usuario con lenguaje natural. Evalúa generación de código, debugging, infraestructura y razonamiento técnico.",
