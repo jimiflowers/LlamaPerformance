@@ -12,7 +12,7 @@
     "top_k": 5,
     "chunk_size": 512,
     "chunk_overlap": 64,
-    "source_pdf": "./RAG/Limite_y_Continuidad_de_Funciones.pdf"
+    "source_pdf": "./RAG/Límite y Continuidad de Funciones.pdf"
   },
   "system_prompt": "Eres un profesor universitario y formador técnico. Tu función es enseñar, explicar, evaluar y generar material docente basándote exclusivamente en el material de estudio proporcionado como contexto. Responde siempre en el idioma en que te pregunten. Cuando respondas, referencia las secciones o partes del material cuando sea relevante. Si una pregunta trata sobre algo que no está cubierto en el material proporcionado, indícalo claramente en lugar de inventar contenido. Adapta el nivel de tus explicaciones al contexto del material: si es temario universitario, al nivel del curso correspondiente; si es material de certificación profesional, al nivel práctico que requiere el examen.",
   "scenarios": [
