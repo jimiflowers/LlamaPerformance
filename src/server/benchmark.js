@@ -129,41 +129,53 @@ class BenchmarkEngine {
           metrics.timeout = true;
         }, config.timeout || 60000);
 
-        let firstTokenTime = null;
-        let lastTokenTime = null;
+        const maxTokens = scenario.max_tokens || 128;
+        const temperature = slotType === 'system'
+          ? (config.temperature_system ?? 0.1)
+          : (config.temperature_user ?? config.temperature ?? 0.7);
 
-        const stream = await client.chat.completions.create({
-          model: modelName,
-          messages,
-          max_tokens: scenario.max_tokens || 128,
-          temperature: slotType === 'system'
-            ? (config.temperature_system ?? 0.1)
-            : (config.temperature_user ?? config.temperature ?? 0.7),
-          stream: true,
-          stream_options: { include_usage: true }
-        }, { signal: controller.signal });
+        if (config.streaming === false) {
+          // Modo no-streaming: respuesta única JSON
+          const response = await client.chat.completions.create({
+            model: modelName,
+            messages,
+            max_tokens: maxTokens,
+            temperature,
+            stream: false
+          }, { signal: controller.signal });
+          metrics.responseText = response.choices[0]?.message?.content || '';
+          metrics.tokens = response.usage?.completion_tokens || 0;
+        } else {
+          // Modo streaming: SSE sin stream_options para máxima compatibilidad con llama-swap
+          const stream = await client.chat.completions.create({
+            model: modelName,
+            messages,
+            max_tokens: maxTokens,
+            temperature,
+            stream: true
+          }, { signal: controller.signal });
 
-        let finalUsage = null;
+          let firstTokenTime = null;
+          let lastTokenTime = null;
 
-        for await (const chunk of stream) {
-          if (chunk.usage) finalUsage = chunk.usage;
-          const text = chunk.choices[0]?.delta?.content || '';
-          if (text) {
-            const now = performance.now();
-            if (!firstTokenTime) {
-              firstTokenTime = now;
-              metrics.ttft = now - metrics.startTime;
-              lastTokenTime = now;
-            } else {
-              metrics.interTokenDelays.push(now - lastTokenTime);
-              lastTokenTime = now;
+          for await (const chunk of stream) {
+            const text = chunk.choices[0]?.delta?.content || '';
+            if (text) {
+              const now = performance.now();
+              if (!firstTokenTime) {
+                firstTokenTime = now;
+                metrics.ttft = now - metrics.startTime;
+                lastTokenTime = now;
+              } else {
+                metrics.interTokenDelays.push(now - lastTokenTime);
+                lastTokenTime = now;
+              }
+              metrics.tokens++;
+              metrics.responseText += text;
             }
-            metrics.tokens++;
-            metrics.responseText += text;
           }
         }
 
-        if (finalUsage?.completion_tokens) metrics.tokens = finalUsage.completion_tokens;
         clearTimeout(timeoutId);
       } catch (error) {
         if (error.name === 'AbortError') metrics.timeout = true;
