@@ -176,22 +176,32 @@ class BenchmarkEngine {
           const decoder = new TextDecoder();
           let buffer = '';
 
+          let _dbgReads = 0, _dbgLines = 0, _dbgDataLines = 0, _dbgChunks = 0;
+          console.log(`[STREAM-DEBUG][${slotType}] fetch OK status=${response.status} content-type=${response.headers.get('content-type')}`);
           try {
             while (true) {
               const { done, value } = await reader.read();
+              _dbgReads++;
+              if (_dbgReads <= 3) console.log(`[STREAM-DEBUG][${slotType}] read #${_dbgReads} done=${done} bytes=${value?.length ?? 0}`);
               if (done) break;
               buffer += decoder.decode(value, { stream: true });
               const lines = buffer.split('\n');
               buffer = lines.pop() ?? '';
+              _dbgLines += lines.length;
               for (const line of lines) {
                 const trimmed = line.trim();
                 if (!trimmed.startsWith('data:')) continue;
+                _dbgDataLines++;
                 const data = trimmed.slice(5).trim();
                 if (!data || data === '[DONE]') continue;
                 try {
                   const chunk = JSON.parse(data);
-                  const text = chunk.choices?.[0]?.delta?.content;
+                  const delta = chunk.choices?.[0]?.delta;
+                  const text = delta?.content || delta?.reasoning_content;
+                  if (_dbgChunks === 0) console.log(`[STREAM-DEBUG][${slotType}] first data chunk keys=${Object.keys(chunk)} choices[0] keys=${Object.keys(chunk.choices?.[0] ?? {})} delta=${JSON.stringify(chunk.choices?.[0]?.delta)}`);
                   if (text) {
+                    _dbgChunks++;
+                    if (_dbgChunks <= 3) console.log(`[STREAM-DEBUG][${slotType}] content chunk #${_dbgChunks}: ${text.substring(0, 50)}`);
                     const now = performance.now();
                     if (firstTokenTime === null) {
                       firstTokenTime = now;
@@ -204,10 +214,11 @@ class BenchmarkEngine {
                     metrics.tokens++;
                     metrics.responseText += text;
                   }
-                } catch { /* chunk SSE malformado — ignorar */ }
+                } catch (e) { console.log(`[STREAM-DEBUG][${slotType}] JSON parse error: ${e.message} | raw: ${data.substring(0, 80)}`); }
               }
             }
           } finally {
+            console.log(`[STREAM-DEBUG][${slotType}] stream ended: reads=${_dbgReads} lines=${_dbgLines} data-lines=${_dbgDataLines} content-chunks=${_dbgChunks} total-tokens=${metrics.tokens}`);
             reader.releaseLock();
           }
         }
@@ -280,7 +291,12 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
       responseTexts: [],
       errors: 0,
       timeouts: 0,
-      resourceSnapshots: []
+      resourceSnapshots: [],
+      systemLatencies: [],
+      systemTtfts: [],
+      systemTokenCounts: [],
+      systemInterTokenDelays: [],
+      systemResponseTexts: []
     };
 
     // Run iterations
@@ -320,11 +336,6 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
         if (userM.responseText) results.responseTexts.push(userM.responseText);
 
         if (concurrent) {
-          if (!results.systemLatencies) results.systemLatencies = [];
-          if (!results.systemTtfts) results.systemTtfts = [];
-          if (!results.systemResponseTexts) results.systemResponseTexts = [];
-          if (!results.systemTokenCounts) results.systemTokenCounts = [];
-          if (!results.systemInterTokenDelays) results.systemInterTokenDelays = [];
           results.systemLatencies.push(sysM.endTime - sysM.startTime);
           if (sysM.ttft !== null) results.systemTtfts.push(sysM.ttft);
           if (sysM.interTokenDelays.length > 0) results.allInterTokenDelays.push(...sysM.interTokenDelays);
