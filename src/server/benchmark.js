@@ -146,33 +146,69 @@ class BenchmarkEngine {
           metrics.responseText = response.choices[0]?.message?.content || '';
           metrics.tokens = response.usage?.completion_tokens || 0;
         } else {
-          // Modo streaming: SSE sin stream_options para máxima compatibilidad con llama-swap
-          const stream = await client.chat.completions.create({
-            model: modelName,
-            messages,
-            max_tokens: maxTokens,
-            temperature,
-            stream: true
-          }, { signal: controller.signal });
+          // Modo streaming: fetch nativo + parsing SSE manual
+          // (evita conflictos del pool de conexiones del SDK con streams concurrentes)
+          const apiBase = orchestrator.getEndpoint();
+          const response = await fetch(`${apiBase}/v1/chat/completions`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer llama-rocks'
+            },
+            body: JSON.stringify({
+              model: modelName,
+              messages,
+              max_tokens: maxTokens,
+              temperature,
+              stream: true
+            }),
+            signal: controller.signal
+          });
+
+          if (!response.ok) {
+            const errText = await response.text().catch(() => '');
+            throw new Error(`HTTP ${response.status}: ${errText}`);
+          }
 
           let firstTokenTime = null;
           let lastTokenTime = null;
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
 
-          for await (const chunk of stream) {
-            const text = chunk.choices[0]?.delta?.content || '';
-            if (text) {
-              const now = performance.now();
-              if (!firstTokenTime) {
-                firstTokenTime = now;
-                metrics.ttft = now - metrics.startTime;
-                lastTokenTime = now;
-              } else {
-                metrics.interTokenDelays.push(now - lastTokenTime);
-                lastTokenTime = now;
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              buffer += decoder.decode(value, { stream: true });
+              const lines = buffer.split('\n');
+              buffer = lines.pop() ?? '';
+              for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed.startsWith('data:')) continue;
+                const data = trimmed.slice(5).trim();
+                if (!data || data === '[DONE]') continue;
+                try {
+                  const chunk = JSON.parse(data);
+                  const text = chunk.choices?.[0]?.delta?.content;
+                  if (text) {
+                    const now = performance.now();
+                    if (firstTokenTime === null) {
+                      firstTokenTime = now;
+                      metrics.ttft = now - metrics.startTime;
+                      lastTokenTime = now;
+                    } else {
+                      metrics.interTokenDelays.push(now - lastTokenTime);
+                      lastTokenTime = now;
+                    }
+                    metrics.tokens++;
+                    metrics.responseText += text;
+                  }
+                } catch { /* chunk SSE malformado — ignorar */ }
               }
-              metrics.tokens++;
-              metrics.responseText += text;
             }
+          } finally {
+            reader.releaseLock();
           }
         }
 
