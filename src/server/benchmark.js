@@ -418,7 +418,9 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
     this.runningBenchmarks.set(runId, {
       id: runId,
       status: 'running',
-      progress: 0
+      progress: 0,
+      pauseRequested: false,
+      aborted: false
     });
 
     const runTask = async () => {
@@ -485,14 +487,15 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
           return await orchestrator.waitForModelUnloaded(modelId);
         };
 
-        // Helper to update progress
+        // Helper to update progress (preserves pause/abort flags)
         let _currentModel = null;
         let _currentModelIndex = 0;
         const updateProgress = () => {
           const progress = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+          const current = this.runningBenchmarks.get(runId) || {};
           this.runningBenchmarks.set(runId, {
+            ...current,
             id: runId,
-            status: 'running',
             progress,
             currentModel: _currentModel,
             currentModelIndex: _currentModelIndex,
@@ -501,6 +504,32 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
           if (progressCallback) {
             progressCallback({ runId, progress });
           }
+        };
+
+        // Helper: check for pause/abort between scenarios
+        const checkControl = async () => {
+          const state = this.runningBenchmarks.get(runId);
+          if (!state) return 'abort';
+          if (state.aborted) return 'abort';
+          if (state.pauseRequested) {
+            // Enter paused state — wait until resumed or aborted
+            const current = this.runningBenchmarks.get(runId);
+            this.runningBenchmarks.set(runId, { ...current, status: 'paused', pauseRequested: false });
+            benchmarkLogger.info('Benchmark paused', { runId });
+            await new Promise(resolve => {
+              const poll = setInterval(() => {
+                const s = this.runningBenchmarks.get(runId);
+                if (!s || s.status !== 'paused' || s.aborted) {
+                  clearInterval(poll);
+                  resolve();
+                }
+              }, 500);
+            });
+            const after = this.runningBenchmarks.get(runId);
+            if (after?.aborted) return 'abort';
+            benchmarkLogger.info('Benchmark resumed', { runId });
+          }
+          return 'continue';
         };
 
         // Inicializar RAG engine si la suite tiene config RAG
@@ -572,6 +601,9 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
 
           // Run each scenario in the suite
           for (const scenario of suite.scenarios) {
+            // Check pause/abort before starting each scenario
+            if ((await checkControl()) === 'abort') break;
+
             try {
               // Modo RAG: recuperar contexto antes de la inferencia
               let augScenario = scenario;
@@ -657,16 +689,20 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
           }
         }
 
-        // Update run as completed
+        // Check if aborted
+        const finalState = this.runningBenchmarks.get(runId);
+        const wasAborted = finalState?.aborted;
+
+        // Update run as completed or aborted
         storage.updateBenchmarkRun(runId, {
-          status: 'completed',
+          status: wasAborted ? 'aborted' : 'completed',
           completed_at: Date.now()
         });
 
         this.runningBenchmarks.set(runId, {
           id: runId,
-          status: 'completed',
-          progress: 100
+          status: wasAborted ? 'aborted' : 'completed',
+          progress: wasAborted ? finalState?.progress : 100
         });
 
         benchmarkLogger.info('Benchmark run completed', { runId, resultsCount: allResults.length });
@@ -709,6 +745,34 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
    */
   getBenchmarkStatus(runId) {
     return this.runningBenchmarks.get(runId);
+  }
+
+  pauseBenchmark(runId) {
+    const state = this.runningBenchmarks.get(runId);
+    if (state && state.status === 'running') {
+      this.runningBenchmarks.set(runId, { ...state, pauseRequested: true });
+      return true;
+    }
+    return false;
+  }
+
+  resumeBenchmark(runId) {
+    const state = this.runningBenchmarks.get(runId);
+    if (state && state.status === 'paused') {
+      this.runningBenchmarks.set(runId, { ...state, status: 'running', pauseRequested: false });
+      return true;
+    }
+    return false;
+  }
+
+  abortBenchmark(runId) {
+    const state = this.runningBenchmarks.get(runId);
+    if (state && (state.status === 'running' || state.status === 'paused')) {
+      // If paused, set status to running so the pause wait loop exits, then aborted flag triggers break
+      this.runningBenchmarks.set(runId, { ...state, status: 'running', aborted: true, pauseRequested: false });
+      return true;
+    }
+    return false;
   }
 }
 

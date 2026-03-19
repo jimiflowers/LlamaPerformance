@@ -30,6 +30,7 @@ function Benchmarks() {
   const [runCurrentModel, setRunCurrentModel] = useState(null);
   const [runModelIndex, setRunModelIndex] = useState(null);
   const [runTotalModels, setRunTotalModels] = useState(null);
+  const [runPauseRequested, setRunPauseRequested] = useState(false);
 
   useEffect(() => {
     loadModels();
@@ -57,13 +58,16 @@ function Benchmarks() {
         if (res.data.currentModel != null) setRunCurrentModel(res.data.currentModel);
         if (res.data.currentModelIndex != null) setRunModelIndex(res.data.currentModelIndex);
         if (res.data.totalModels != null) setRunTotalModels(res.data.totalModels);
+        setRunPauseRequested(!!res.data.pauseRequested);
 
-        // Stop polling when not running
-        if (res.data.status !== 'running') {
+        // Stop polling when terminal state
+        if (!['running', 'paused'].includes(res.data.status)) {
           clearInterval(interval);
           loadRecentRuns();
           if (res.data.status === 'completed') {
             setSuccess('✅ Benchmark completed!');
+          } else if (res.data.status === 'aborted') {
+            setSuccess('⏹ Benchmark aborted.');
           } else if (res.data.status === 'failed') {
             setError('❌ Benchmark failed. Check logs for details.');
           }
@@ -93,10 +97,13 @@ function Benchmarks() {
       const res = await benchmarksAPI.getSuites();
       setSuites(res.data.suites);
       if (res.data.suites.length > 0) {
-        setSelectedSuite(res.data.suites[0].name);
-        // Select all scenarios by default
-        if (res.data.suites[0].scenarios) {
-          setSelectedScenarios(res.data.suites[0].scenarios.map(s => s.name));
+        const first = res.data.suites[0];
+        setSelectedSuite(first.name);
+        if (first.scenarios) {
+          setSelectedScenarios(first.scenarios.map(s => s.name));
+        }
+        if (first.default_config) {
+          setConfig(prev => ({ ...prev, ...first.default_config }));
         }
       }
     } catch (err) {
@@ -137,8 +144,10 @@ function Benchmarks() {
     setSelectedSuite(suiteName);
     const suite = suites.find(s => s.name === suiteName);
     if (suite?.scenarios) {
-      // Select all scenarios by default when switching suites
       setSelectedScenarios(suite.scenarios.map(s => s.name));
+    }
+    if (suite?.default_config) {
+      setConfig(prev => ({ ...prev, ...suite.default_config }));
     }
   };
 
@@ -214,6 +223,30 @@ function Benchmarks() {
     }
   };
 
+  const handlePauseResume = async () => {
+    if (!currentRunId) return;
+    try {
+      if (runStatus === 'paused') {
+        await benchmarksAPI.resume(currentRunId);
+        setRunStatus('running');
+      } else {
+        await benchmarksAPI.pause(currentRunId);
+        setRunPauseRequested(true);
+      }
+    } catch (err) {
+      setError(err.response?.data?.error || err.message);
+    }
+  };
+
+  const handleAbort = async () => {
+    if (!currentRunId) return;
+    try {
+      await benchmarksAPI.abort(currentRunId);
+    } catch (err) {
+      setError(err.response?.data?.error || err.message);
+    }
+  };
+
   const handleIngest = async (skipIngest = false) => {
     if (!selectedSuite) return;
     setRagLoading(true);
@@ -244,11 +277,14 @@ function Benchmarks() {
       {error && <div className="error">{error}</div>}
       {success && <div className="success">{success}</div>}
 
-      {currentRunId && runStatus === 'running' && (
+      {currentRunId && ['running', 'paused'].includes(runStatus) && (
         <div className="card" style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          <div className="spinner" aria-label="Benchmark running" />
+          {runStatus === 'running' && <div className="spinner" aria-label="Benchmark running" />}
+          {runStatus === 'paused' && <span style={{ fontSize: '1.5rem' }}>⏸</span>}
           <div style={{ flex: 1 }}>
-            <h4 style={{ marginBottom: '0.5rem' }}>Benchmark running...</h4>
+            <h4 style={{ marginBottom: '0.5rem' }}>
+              {runStatus === 'paused' ? 'Benchmark pausado' : 'Benchmark running...'}
+            </h4>
             {runCurrentModel && (
               <p style={{ marginBottom: '0.5rem', color: '#2c3e50' }}>
                 Testing <strong>{runCurrentModel}</strong>
@@ -259,11 +295,34 @@ function Benchmarks() {
                 )}
               </p>
             )}
+            {runPauseRequested && runStatus === 'running' && (
+              <p style={{ marginBottom: '0.5rem', color: '#f39c12', fontSize: '0.85rem', fontStyle: 'italic' }}>
+                ⏳ Pausa pendiente — se aplicará al finalizar la subprueba actual
+              </p>
+            )}
             <p style={{ marginBottom: '0.5rem', color: '#7f8c8d', fontSize: '0.85rem' }}>Run ID: <code>{currentRunId}</code></p>
             <div className="progress-bar-container">
               <div className="progress-bar-fill" style={{ width: `${runProgress || 5}%` }} />
             </div>
             <p style={{ marginTop: '0.5rem', color: '#3498db', fontWeight: 'bold' }}>{runProgress || 0}% completed</p>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', flexShrink: 0 }}>
+            <button
+              type="button"
+              className="btn btn-sm"
+              style={{ background: runStatus === 'paused' ? '#27ae60' : '#f39c12', color: 'white', minWidth: '110px' }}
+              onClick={handlePauseResume}
+            >
+              {runStatus === 'paused' ? '▶ Resume TEST' : '⏸ Pause TEST'}
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm"
+              style={{ background: '#e74c3c', color: 'white', minWidth: '110px' }}
+              onClick={handleAbort}
+            >
+              ⏹ Abort TEST
+            </button>
           </div>
         </div>
       )}

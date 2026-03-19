@@ -12,6 +12,7 @@ function Results() {
   const [runProgress, setRunProgress] = useState(0);
   const [initialRunParam, setInitialRunParam] = useState(null);
   const [expandedCells, setExpandedCells] = useState(new Set());
+  const [runPauseRequested, setRunPauseRequested] = useState(false);
 
   useEffect(() => {
     // Parse ?run=<runId>
@@ -40,7 +41,13 @@ function Results() {
         if (res.data.progress !== null && res.data.progress !== undefined) {
           setRunProgress(res.data.progress);
         }
+        setRunPauseRequested(!!res.data.pauseRequested);
         if (res.data.status === 'completed') {
+          clearInterval(interval);
+          loadResults(selectedRun);
+          loadRuns();
+        }
+        if (res.data.status === 'aborted') {
           clearInterval(interval);
           loadResults(selectedRun);
           loadRuns();
@@ -74,6 +81,30 @@ function Results() {
       setError(err.response?.data?.error || err.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handlePauseResume = async () => {
+    if (!selectedRun) return;
+    try {
+      if (runStatus === 'paused') {
+        await benchmarksAPI.resume(selectedRun);
+        setRunStatus('running');
+      } else {
+        await benchmarksAPI.pause(selectedRun);
+        setRunPauseRequested(true);
+      }
+    } catch (err) {
+      setError(err.response?.data?.error || err.message);
+    }
+  };
+
+  const handleAbort = async () => {
+    if (!selectedRun) return;
+    try {
+      await benchmarksAPI.abort(selectedRun);
+    } catch (err) {
+      setError(err.response?.data?.error || err.message);
     }
   };
 
@@ -257,16 +288,42 @@ function Results() {
 
       {error && <div className="error">{error}</div>}
 
-      {runStatus === 'running' && (
+      {['running', 'paused'].includes(runStatus) && (
         <div className="card" style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          <div className="spinner" aria-label="Benchmark running" />
+          {runStatus === 'running' && <div className="spinner" aria-label="Benchmark running" />}
+          {runStatus === 'paused' && <span style={{ fontSize: '1.5rem' }}>⏸</span>}
           <div style={{ flex: 1 }}>
-            <h4 style={{ marginBottom: '0.5rem' }}>Benchmark running...</h4>
+            <h4 style={{ marginBottom: '0.5rem' }}>
+              {runStatus === 'paused' ? 'Benchmark pausado' : 'Benchmark running...'}
+            </h4>
+            {runPauseRequested && runStatus === 'running' && (
+              <p style={{ marginBottom: '0.5rem', color: '#f39c12', fontSize: '0.85rem', fontStyle: 'italic' }}>
+                ⏳ Pausa pendiente — se aplicará al finalizar la subprueba actual
+              </p>
+            )}
             <p style={{ marginBottom: '0.5rem', color: '#7f8c8d' }}>Run ID: <code>{selectedRun}</code></p>
             <div className="progress-bar-container">
               <div className="progress-bar-fill" style={{ width: `${runProgress || 5}%` }} />
             </div>
             <p style={{ marginTop: '0.5rem', color: '#3498db', fontWeight: 'bold' }}>{runProgress || 0}% completed</p>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', flexShrink: 0 }}>
+            <button
+              type="button"
+              className="btn btn-sm"
+              style={{ background: runStatus === 'paused' ? '#27ae60' : '#f39c12', color: 'white', minWidth: '110px' }}
+              onClick={handlePauseResume}
+            >
+              {runStatus === 'paused' ? '▶ Resume TEST' : '⏸ Pause TEST'}
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm"
+              style={{ background: '#e74c3c', color: 'white', minWidth: '110px' }}
+              onClick={handleAbort}
+            >
+              ⏹ Abort TEST
+            </button>
           </div>
         </div>
       )}

@@ -425,6 +425,21 @@ app.get('/api/benchmarks/runs/:id/status', (req, res) => {
   }
 });
 
+app.post('/api/benchmarks/runs/:id/pause', (req, res) => {
+  const ok = benchmark.pauseBenchmark(req.params.id);
+  res.json(ok ? { success: true } : { success: false, error: 'Run not active or already paused' });
+});
+
+app.post('/api/benchmarks/runs/:id/resume', (req, res) => {
+  const ok = benchmark.resumeBenchmark(req.params.id);
+  res.json(ok ? { success: true } : { success: false, error: 'Run is not paused' });
+});
+
+app.post('/api/benchmarks/runs/:id/abort', (req, res) => {
+  const ok = benchmark.abortBenchmark(req.params.id);
+  res.json(ok ? { success: true } : { success: false, error: 'Run not active' });
+});
+
 /**
  * GET /api/benchmarks/runs/:id/logs
  * Logs asociados a un run

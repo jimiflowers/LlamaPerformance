@@ -35,6 +35,9 @@ export const benchmarksAPI = {
   exportCSV: (id) => api.get(`/benchmarks/runs/${id}/export/csv`, { responseType: 'blob' }),
   logs: (id, limit = 100) => api.get(`/benchmarks/runs/${id}/logs`, { params: { limit } }),
   status: (id) => api.get(`/benchmarks/runs/${id}/status`),
+  pause: (id) => api.post(`/benchmarks/runs/${id}/pause`),
+  resume: (id) => api.post(`/benchmarks/runs/${id}/resume`),
+  abort: (id) => api.post(`/benchmarks/runs/${id}/abort`),
   deleteRun: (id) => api.delete(`/benchmarks/runs/${id}`)
 };
 
