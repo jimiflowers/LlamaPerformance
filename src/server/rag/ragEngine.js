@@ -18,11 +18,11 @@ export class RagEngine {
   async embed(texts) {
     const input = Array.isArray(texts) ? texts : [texts];
     const res = await axios.post(
-      `${this.embeddingsEndpoint}/api/embed`,
+      `${this.embeddingsEndpoint}/v1/embeddings`,
       { model: this.embeddingsModel, input },
       { timeout: 30000 }
     );
-    return res.data.embeddings; // [ [float, ...], ... ]
+    return res.data.data.map(d => d.embedding); // OpenAI format: data[].embedding
   }
 
   async retrieve(question) {

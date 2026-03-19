@@ -5,7 +5,7 @@
   "concurrent_slots": 1,
   "rag": {
     "embeddings_endpoint": "http://10.0.0.1:7998",
-    "embeddings_model": "nomic-embed-text-v1.5",
+    "embeddings_model": "model.gguf",
     "qdrant_endpoint": "http://10.0.0.2:6333",
     "qdrant_api_key": "alia-access-token-2026",
     "collection": "benchmark_profesor",

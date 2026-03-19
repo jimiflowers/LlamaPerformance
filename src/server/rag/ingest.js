@@ -83,11 +83,11 @@ export async function ingestPdf(pdfPath, ragConfig, onProgress) {
     const done = Math.min(i + batchSize, chunks.length);
     onProgress?.({ step: 'embed', message: `Embebiendo ${done}/${chunks.length} chunks...` });
     const res = await axios.post(
-      `${embeddings_endpoint}/api/embed`,
+      `${embeddings_endpoint}/v1/embeddings`,
       { model: embeddings_model, input: batch.map(c => c.text) },
       { timeout: 60000 }
     );
-    allVectors.push(...res.data.embeddings);
+    allVectors.push(...res.data.data.map(d => d.embedding)); // OpenAI format: data[].embedding
   }
   const vectorDim = allVectors[0].length;
   logger.info(`RAG ingest: vector dim=${vectorDim}`);
