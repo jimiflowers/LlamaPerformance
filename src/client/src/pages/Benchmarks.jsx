@@ -494,24 +494,18 @@ function Benchmarks() {
           <div className="card-header">Select Benchmark Suite</div>
           <div className="form-group">
             <label className="form-label">Suite</label>
-            <div style={{ border: '1px solid #ced4da', borderRadius: '4px', overflowY: 'auto', maxHeight: '160px' }}>
-              {suites.map((suite, idx) => (
-                <div
-                  key={suite.name}
-                  onClick={() => handleSuiteChange(suite.name)}
-                  style={{
-                    padding: '8px 12px',
-                    cursor: 'pointer',
-                    borderTop: idx > 0 ? '1px solid #ced4da' : 'none',
-                    background: selectedSuite === suite.name ? '#e8f0fe' : 'white',
-                    borderLeft: selectedSuite === suite.name ? '3px solid #3498db' : '3px solid transparent'
-                  }}
-                >
-                  <strong>{suite.name}</strong>
-                  {suite.description && <span style={{ color: '#666', marginLeft: '6px' }}>— {suite.description}</span>}
-                </div>
+            <select
+              className="form-control"
+              value={selectedSuite || ''}
+              onChange={(e) => handleSuiteChange(e.target.value)}
+              required
+            >
+              {suites.map(suite => (
+                <option key={suite.name} value={suite.name} style={{ fontWeight: 'bold' }}>
+                  {suite.name} - {suite.description}
+                </option>
               ))}
-            </div>
+            </select>
           </div>
 
           {currentSuite && (
