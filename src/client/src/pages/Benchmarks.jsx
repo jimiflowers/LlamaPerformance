@@ -690,6 +690,18 @@ function Benchmarks() {
             <p style={{ color: '#e74c3c' }}>No models configured. Add models in the Models tab first.</p>
           ) : (
             <div>
+              <div style={{ marginBottom: '0.75rem', paddingBottom: '0.75rem', borderBottom: '1px solid #e9ecef' }}>
+                <input
+                  type="checkbox"
+                  id="select-all-models"
+                  checked={models.length > 0 && selectedModels.length === models.length}
+                  onChange={(e) => setSelectedModels(e.target.checked ? models.map(m => m.id) : [])}
+                  style={{ width: '18px', height: '18px', flexShrink: 0, verticalAlign: 'middle' }}
+                />
+                <label htmlFor="select-all-models" style={{ cursor: 'pointer', marginLeft: '0.5rem', fontWeight: 600 }}>
+                  Select all models
+                </label>
+              </div>
               {models.map(model => {
                 const isRunning = model.status === 'running';
                 return (
