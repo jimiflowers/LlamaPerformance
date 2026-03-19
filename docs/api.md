@@ -307,7 +307,7 @@ Ingest a PDF into Qdrant for use with a RAG benchmark suite.
 
 **Body:** `{ "suiteName": "profesor_alia", "skipIngest": false }`
 
-- `suiteName` — name of a suite file in `benchmarks/suites/` that contains a `rag` block with `source_pdf`, `embeddings_endpoint`, `qdrant_endpoint`, `collection`, etc.
+- `suiteName` — name of a suite file in `benchmarks/suites/` that contains a `rag` block with `source_pdf`, `embeddings_endpoint` (llama.cpp `/v1/embeddings`), `qdrant_endpoint`, `collection`, etc.
 - `skipIngest` — if `true`, skips PDF parsing and embedding; returns immediately confirming the existing Qdrant collection will be used as-is.
 
 **Success response (full ingest):**
@@ -428,6 +428,23 @@ Returns service health and llama.cpp connectivity status.
   "timestamp": 1705680000
 }
 ```
+
+### GET /system/stats-health
+Check whether the GPU stats endpoint is reachable. The frontend calls this before launching a benchmark run and blocks the run if the endpoint is down.
+
+The stats endpoint is `http://aion.home.lan:9999/gpu` (3 s timeout, hardcoded).
+
+**Response (reachable):**
+```json
+{ "ok": true }
+```
+
+**Response (unreachable):**
+```json
+{ "ok": false, "error": "connect ECONNREFUSED 10.0.0.5:9999" }
+```
+
+---
 
 ### GET /system/stats
 Dashboard statistics.

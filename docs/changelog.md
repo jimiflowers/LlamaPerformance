@@ -1,5 +1,187 @@
 # Changelog
 
+## 2026-03-19 — Streaming fix, RAG endpoint corrections, Abort/Pause, UI improvements
+
+### Context
+
+Full-day debugging and feature session on the `feature/rag-mode` branch. Fixed streaming response collection (always empty with Qwen3 "thinking" models), corrected the embeddings endpoint for llama.cpp (was Ollama-format), fixed Qdrant authentication, and added Abort/Pause buttons, a stats-endpoint pre-flight check, per-slot metrics breakdown, and several UI quality-of-life additions.
+
+---
+
+### Bug fix — streaming responseText always empty
+
+**`src/server/benchmark.js`**
+
+The previous streaming implementation used the OpenAI SDK's `for await (chunk of stream)` which silently produced empty responses when concurrent requests shared the same client instance. This was replaced with native `fetch` + manual SSE line parsing.
+
+After that fix, `responseText` was still empty. Root cause: Qwen3 models with "thinking" mode enabled emit generated text in `delta.reasoning_content` instead of `delta.content`. Added fallback:
+
+```js
+const text = delta?.content || delta?.reasoning_content;
+```
+
+`stream_options: { include_usage: true }` was also investigated but was not the root cause.
+
+---
+
+### Bug fix — RAG embeddings endpoint (Ollama → llama.cpp)
+
+**`src/server/rag/ingest.js`** and **`src/server/rag/ragEngine.js`**
+
+The embedding server is llama.cpp, not Ollama. Three corrections applied to both files:
+
+| Before | After |
+|---|---|
+| `POST /api/embed` | `POST /v1/embeddings` |
+| Body: `{ model, input: [text] }` | Body: `{ model, input: [text] }` (same) |
+| Response: `res.data.embeddings` | Response: `res.data.data.map(d => d.embedding)` |
+| Batch size: 32 | Batch size: 1 (llama.cpp doesn't support batched embeds) |
+
+---
+
+### Bug fix — Qdrant authentication (self-hosted)
+
+**`src/server/rag/ingest.js`** and **`src/server/rag/ragEngine.js`**
+
+Self-hosted Qdrant expects `Authorization: Bearer <token>` rather than just `api-key`. Both headers are now sent simultaneously:
+
+```js
+{ 'api-key': apiKey, 'Authorization': `Bearer ${apiKey}` }
+```
+
+---
+
+### Bug fix — suite config not applied on selection
+
+**`src/client/src/pages/Benchmarks.jsx`**
+
+When selecting a suite from the dropdown, the `default_config` values (iterations, timeout, temperature, temperature_system, temperature_user) were not being read and applied to the form. Fixed by adding a `useEffect` that watches `suiteName` and updates all config fields from `currentSuite.default_config`.
+
+---
+
+### Bug fix — system* fields lazy init in storage
+
+**`src/server/storage.js`**
+
+`systemLatencies`, `systemTtfts`, `systemTokenCounts`, `systemInterTokenDelays`, and `systemResponseTexts` were initialised lazily inside `runScenario`. This caused undefined-property errors when multiple slots wrote concurrently. All five arrays are now initialised on the `results` object at the start of `runScenario`.
+
+---
+
+### Feature — Abort and Pause buttons (Benchmarks + Results)
+
+**`src/server/benchmark.js`**
+
+- Each benchmark run now stores a `killController: new AbortController()` in its `runningBenchmarks` map entry.
+- `runSingleInference` receives `runId`; it reads `killController.signal` and attaches a one-shot `abort` listener so the active `fetch` is cancelled immediately on abort.
+- Between iterations in `runScenario`, the `aborted` flag is checked; if set, the loop exits without starting the next iteration.
+
+**`src/client/src/pages/Benchmarks.jsx`** and **`src/client/src/pages/Results.jsx`**
+
+- `aborting` state added — while `true`, a modal overlay is shown ("Aborting benchmark…").
+- On abort confirmation: `benchmarkAPI.stop(runId)` is called, then polling detects `status === 'failed'` and the run is automatically deleted, returning the UI to idle state.
+- Pause button: calls `benchmarkAPI.pause/resume` and reflects state in button label.
+
+---
+
+### Feature — stats-endpoint pre-flight check
+
+**`src/server/index.js`**
+
+New endpoint:
+
+```
+GET /api/system/stats-health
+```
+
+Pings `http://aion.home.lan:9999/gpu` with a 3 s timeout. Returns `{ ok: true }` on success or `{ ok: false, error }` on failure.
+
+**`src/client/src/pages/Benchmarks.jsx`**
+
+- `statsAvailable` state added; checked on component mount via `systemAPI.statsHealth()`.
+- If `statsAvailable` is `false`, a warning banner is shown on the Benchmarks page.
+- `handleRunBenchmark` checks `statsAvailable` before launching; if false, shows an alert and refuses to start.
+
+**`src/client/src/utils/api.js`**
+
+```js
+systemAPI.statsHealth: () => api.get('/system/stats-health')
+```
+
+---
+
+### Feature — individual metrics by slot (User / System)
+
+**`src/server/benchmark.js`** and **`src/client/src/pages/Results.jsx`**
+
+The Results page now shows per-slot metric breakdowns in addition to the combined figures. `systemResponseTexts` is stored alongside `responseTexts` and exposed in the exported JSON without truncation.
+
+---
+
+### Feature — RAG chunks exported without truncation
+
+**`src/server/benchmark.js`**
+
+The `.slice(0, 500)` truncation on chunk text that was applied when storing `ragChunks` in `raw` was removed. Full chunk text is now preserved in exported JSON.
+
+---
+
+### Feature — "Add all models" checkbox (Models tab)
+
+**`src/client/src/pages/Models.jsx`**
+
+- `addAll` and `addAllProgress` states added.
+- "Add all models" checkbox in the Add Model modal triggers a sequential batch-add of all models from the scan result, skipping any already in `models.json`.
+- Progress bar shown during the operation.
+
+---
+
+### Feature — "Select all models" checkbox (Benchmarks tab)
+
+**`src/client/src/pages/Benchmarks.jsx`**
+
+A "Select all models" checkbox above the model list toggles selection of all available models at once.
+
+---
+
+### Feature — suite listbox bold labels
+
+**`src/client/src/pages/Benchmarks.jsx`**
+
+Suite names in the `<select>` dropdown are now rendered with `font-weight: bold` via inline `style` on each `<option>`. Reverted a temporary custom-list implementation that caused UX regression.
+
+---
+
+### Suite — `profesor_spanish.json` corrections
+
+**`benchmarks/suites/profesor_spanish.json`**
+
+| Field | Before | After |
+|---|---|---|
+| `embeddings_endpoint` | `http://10.0.0.1:8081` | `http://10.0.0.1:7998` |
+| `embeddings_model` | `nomic-embed-text-v1.5` | `model.gguf` |
+| `source_pdf` | Remote absolute path | `./RAG/Límite y Continuidad de Funciones.pdf` |
+
+The `RAG/` folder at project root (gitignored) holds the PDF used for ingestion.
+
+---
+
+### Files changed this session
+
+| File | Changes |
+|---|---|
+| `src/server/benchmark.js` | Native fetch streaming; `reasoning_content` fallback; `killController` abort; `runId` propagation; abort check between iterations; `ragChunks` without truncation |
+| `src/server/storage.js` | `system*` arrays initialised eagerly at results object creation |
+| `src/server/index.js` | `GET /system/stats-health` endpoint; improved RAG ingest error logging |
+| `src/server/rag/ingest.js` | Endpoint `/v1/embeddings`; response format `data[].embedding`; batch size 1; dual Qdrant auth headers |
+| `src/server/rag/ragEngine.js` | Same endpoint, format, and auth fixes as `ingest.js` |
+| `src/client/src/pages/Benchmarks.jsx` | Suite config auto-load; `aborting` modal; stats pre-flight check + banner; "Select all models" checkbox; bold suite labels |
+| `src/client/src/pages/Results.jsx` | `aborting` modal; auto-delete after abort; per-slot metrics display |
+| `src/client/src/pages/Models.jsx` | "Add all models" checkbox + progress bar |
+| `src/client/src/utils/api.js` | `systemAPI.statsHealth` |
+| `benchmarks/suites/profesor_spanish.json` | Embeddings endpoint port, model name, source PDF path |
+
+---
+
 ## 2026-03-18 — RAG mode (Retrieval-Augmented Generation)
 
 ### Context

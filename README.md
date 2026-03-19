@@ -35,7 +35,7 @@ The original FLPerformance was built around Microsoft Foundry Local (Windows, ON
   - VRAM peak usage (MB and %) and free margin
   - Error rate and performance score
 - **Dual-slot concurrent benchmarking**: Suites can define `prompt_system` (JSON, low temperature) and `prompt_user` (natural language, higher temperature) pairs — both slots are sent concurrently via `Promise.all`, mirroring a `parallel=2` llama-swap setup. All metrics (tokens, delays, latency) aggregate both slots
-- **RAG mode**: Suites with a `rag` block activate retrieval-augmented generation. Before each scenario the engine embeds the `question` via Ollama, retrieves the top-k matching chunks from Qdrant, and passes them as context in the system message. The Benchmarks tab provides **Ingest PDF** and **Skip** buttons; the Results tab shows the retrieved chunks with their similarity scores
+- **RAG mode**: Suites with a `rag` block activate retrieval-augmented generation. Before each scenario the engine embeds the `question` via a llama.cpp embeddings server (`/v1/embeddings`), retrieves the top-k matching chunks from Qdrant, and passes them as context in the system message. The Benchmarks tab provides **Ingest PDF** and **Skip** buttons; the Results tab shows the retrieved chunks with their similarity scores and retrieval latency
 - **Multi-model sequential benchmarking**: Select any number of models — including stopped ones — and the engine tests each in sequence, waiting for VRAM to clear between models, then shows a side-by-side comparison
 - **Multi-model comparison**: Side-by-side charts and a radar overview
 - **VRAM usage section**: Bar chart and table of peak VRAM consumption per model, with a 100% reference line and colour-coded margin alerts
@@ -55,7 +55,7 @@ The original FLPerformance was built around Microsoft Foundry Local (Windows, ON
 | llama-swap or llama.cpp | Running on a GPU machine, accessible by HTTP |
 | SSH access to GPU machine | Only needed for the model discovery scan |
 | GPU stats endpoint (optional) | `http://<gpu-host>:9999/gpu` — used for real-time VRAM telemetry during benchmarks |
-| Ollama embeddings server (optional) | Only needed for RAG suites; must serve an embedding model (e.g. nomic-embed-text-v1.5) on its `/api/embed` endpoint |
+| llama.cpp embeddings server (optional) | Only needed for RAG suites; must serve an embedding model via the `/v1/embeddings` endpoint (OpenAI format). A separate llama.cpp instance loaded with an embedding model (e.g. nomic-embed-text-v1.5) works. |
 | Qdrant vector database (optional) | Only needed for RAG suites; accessible by HTTP with an API key |
 
 The application does **not** need to run on the GPU machine itself. The backend can run on any Linux host that has network access to the llama.cpp server.
@@ -148,6 +148,7 @@ npm run server   # serves the built UI from the Express server on port 3001
 ### Models tab
 
 - Lists all models from `models.json`
+- **Add Model**: add a single model manually, or tick **Add all models** to batch-import all models discovered in the last SSH/local scan. A progress bar is shown during batch import; models already in the list are skipped automatically.
 - **Load**: sends a load request to llama.cpp for that model. If another model is already loaded, a dialog offers three choices: unload first, keep both (advanced — may hang on single-GPU hardware), or cancel.
 - **Unload**: unloads the model and frees VRAM
 - **Test**: runs a single inference request to verify the model responds
@@ -169,18 +170,21 @@ npm run server   # serves the built UI from the Express server on port 3001
 1. Select a benchmark suite:
    - `default` — 9 single-prompt scenarios
    - `mayordomo_spanish` — 8 dual-slot scenarios in Spanish (concurrent JSON system + natural-language user prompts)
-   - `profesor_alia` — 4 RAG scenarios in Spanish (retrieval-augmented; requires Ollama + Qdrant). Marked with a **RAG** badge
-2. **RAG suites only** — an ingest panel appears below the suite card showing the collection name, top_k, chunk size, and source PDF path. Before running benchmarks for the first time click **Ingest PDF** to parse the PDF, embed all chunks, and upload them to Qdrant. On subsequent runs you can click **Skip** to reuse the existing collection.
-3. Tick one or more models — **any model can be selected, regardless of whether it is currently loaded**
-4. Configure iterations, timeout, and temperature. Dual-prompt suites expose two separate temperature fields: **System temperature** (for JSON prompts, default 0.1) and **User temperature** (for natural-language prompts, default 0.7)
-5. Click **Run Benchmark** — the engine will:
+   - `profesor_spanish` — 8 RAG scenarios in Spanish (retrieval-augmented; requires a llama.cpp embeddings server + Qdrant). Marked with a **RAG** badge
+   - `ingeniero_spanish` — 7 dual-slot scenarios in Spanish for engineering assistant role evaluation
+2. **RAG suites only** — an ingest panel appears below the suite card showing the collection name, top_k, chunk size, and source PDF path. Before running benchmarks for the first time click **Ingest PDF** to parse the PDF, embed all chunks (one at a time via llama.cpp `/v1/embeddings`), and upload them to Qdrant. On subsequent runs you can click **Skip** to reuse the existing collection. The PDF must be placed in the `RAG/` folder at the project root (gitignored).
+3. Tick one or more models — **any model can be selected, regardless of whether it is currently loaded** — or use the **Select all models** checkbox
+4. Configure iterations, timeout, and temperature. When a suite is selected its `default_config` values are loaded automatically. Dual-prompt suites expose two separate temperature fields: **System temperature** (for JSON prompts, default 0.1) and **User temperature** (for natural-language prompts, default 0.7)
+5. If the GPU stats endpoint (`aion.home.lan:9999`) is not reachable, a warning banner is shown and **Run Benchmark** is blocked until the endpoint is available.
+6. Click **Run Benchmark** — the engine will:
    - For each model in order: send the first inference request (triggering implicit load in llama-swap), then retry `GET /upstream/{model}/health` every 3 s for up to 60 s until the model reports `status: ok`
-   - For RAG suites: embed each scenario's `question` via Ollama, retrieve top-k chunks from Qdrant, prepend them as context in the system message, then run as a single-slot inference
+   - For RAG suites: embed each scenario's `question` via the llama.cpp embeddings server (`/v1/embeddings`), retrieve top-k chunks from Qdrant, prepend them as context in the system message, then run as a single-slot inference
    - For dual-slot suites: send system and user prompts concurrently (`Promise.all`) — wall-clock latency and total tokens aggregate both slots
    - Apply a 3-second settling pause after model confirmation to avoid inflated TTFT on the first timed inference
    - Between models: poll `GET /running` every 500 ms until the previous model disappears (up to 60 s), confirming VRAM is free before triggering the next load
    - Unload the last model when its tests are done
-6. The progress card shows the model currently under test and its position in the queue (e.g. "Testing Gemma-3-12B (2 of 3)")
+7. The progress card shows the model currently under test and its position in the queue (e.g. "Testing Gemma-3-12B (2 of 3)")
+8. **Pause** and **Abort** buttons are available during a run. Aborting terminates the active inference immediately and auto-deletes the run; a modal overlay confirms the abort is in progress.
 
 ### Results tab
 
@@ -191,7 +195,7 @@ npm run server   # serves the built UI from the Express server on port 3001
 - **Delete Run** — permanently removes a run from storage
 - **VRAM Usage section** — table (Model | VRAM peak MB | VRAM peak % | GPU avg % | Free margin MB) and bar chart with a red 100% reference line. Sorted by consumption descending. Colour-coded: green < 75%, orange 75–90%, red > 90%; margin red if < 500 MB. Only shown when VRAM telemetry data is present
 - **Model Responses table** — below the Detailed Results table, a cross-table shows the actual text returned by each model for every scenario (rows = scenarios, columns = models). For dual-slot suites, each cell shows both the **User** and **System** responses, labelled. Cells are truncated to ~5 lines with a **Show more / Show less** toggle. The full text is always shown when printing
-- **RAG — Contexto Recuperado** — for RAG benchmark runs, a card below Model Responses shows the document chunks retrieved from Qdrant for each scenario. Each chunk displays its similarity score and the retrieval latency (ms). This allows side-by-side evaluation of how well each model used the provided context
+- **RAG — Contexto Recuperado** — for RAG benchmark runs, a card below Model Responses shows the document chunks retrieved from Qdrant for each scenario. Each chunk displays its similarity score and the retrieval latency (ms). Full chunk text is preserved (no truncation). This allows side-by-side evaluation of how well each model used the provided context
 
 ### Settings tab
 
@@ -227,7 +231,9 @@ LlamaPerformance/
 │   └── suites/
 │       ├── default.json           # 9 single-prompt benchmark scenarios
 │       ├── mayordomo_spanish.json # 8 dual-slot scenarios (ES) for role-model selection
-│       └── profesor_alia.json     # 4 RAG scenarios (ES) for university professor assistant
+│       ├── ingeniero_spanish.json # 7 dual-slot scenarios (ES) for engineering assistant
+│       └── profesor_spanish.json  # 8 RAG scenarios (ES) for university professor assistant
+├── RAG/                           # PDF files for RAG ingestion — gitignored
 ├── docs/
 │   ├── api.md                 # Full API reference
 │   └── changelog.md           # Detailed changelog per session
@@ -290,15 +296,15 @@ A suite activates RAG mode when it contains a top-level `rag` block. Each scenar
   "name": "my_rag_suite",
   "description": "RAG benchmark over a document",
   "rag": {
-    "embeddings_endpoint": "http://ollama-host:11434",
-    "embeddings_model": "nomic-embed-text-v1.5",
+    "embeddings_endpoint": "http://llama-embed-host:7998",
+    "embeddings_model": "model.gguf",
     "qdrant_endpoint": "http://qdrant-host:6333",
     "qdrant_api_key": "your-api-key",
     "collection": "my_collection",
     "top_k": 5,
     "chunk_size": 512,
     "chunk_overlap": 64,
-    "source_pdf": "/absolute/path/to/document.pdf"
+    "source_pdf": "./RAG/document.pdf"
   },
   "system_prompt": "You are an expert assistant. Answer using only the provided material.",
   "scenarios": [
@@ -322,15 +328,15 @@ A suite activates RAG mode when it contains a top-level `rag` block. Each scenar
 
 | RAG field | Description |
 |---|---|
-| `embeddings_endpoint` | Base URL of the Ollama server (e.g. `http://host:11434`) |
-| `embeddings_model` | Name of the embedding model to use |
+| `embeddings_endpoint` | Base URL of the llama.cpp embeddings server (e.g. `http://host:7998`). The server must expose `POST /v1/embeddings` in OpenAI format |
+| `embeddings_model` | Model name sent in the request body (e.g. `model.gguf`) |
 | `qdrant_endpoint` | Base URL of the Qdrant instance |
 | `qdrant_api_key` | API key for Qdrant authentication |
 | `collection` | Qdrant collection name (created/replaced on ingest) |
 | `top_k` | Number of chunks to retrieve per query |
 | `chunk_size` | Target chunk size in tokens (1 token ≈ 4 characters) |
 | `chunk_overlap` | Overlap between consecutive chunks in tokens |
-| `source_pdf` | Absolute path to the PDF file on the machine running the server |
+| `source_pdf` | Path to the PDF file on the machine running the server. Relative paths are resolved from the project root. Recommended: place the PDF in `RAG/` (gitignored) and use `./RAG/file.pdf` |
 
 The `system_prompt` at the suite level is used as the base system message; retrieved chunks are appended to it automatically.
 
