@@ -397,7 +397,9 @@ app.get('/api/benchmarks/suites', (req, res) => {
       return {
         name: file.replace('.json', ''),
         description: suite.description || '',
-        scenarios: suite.scenarios || []
+        scenarios: suite.scenarios || [],
+        default_config: suite.default_config || null,
+        rag: suite.rag || null
       };
     });
     res.json({ suites });
