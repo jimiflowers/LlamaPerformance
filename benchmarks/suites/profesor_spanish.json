@@ -1,0 +1,91 @@
+{
+  "name": "profesor_spanish",
+  "description": "Suite de benchmark para candidatos al rol Profesor. Slot único con modo RAG real: el PDF se ingesta en Qdrant vía nomic-embed-text-v1.5 y cada pregunta pasa por retrieval antes de llegar al modelo. Evalúa fidelidad al material, calidad pedagógica y detección de alucinaciones.",
+  "version": "1.0.0",
+  "concurrent_slots": 1,
+  "rag": {
+    "embeddings_endpoint": "http://10.0.0.1:7998",
+    "embeddings_model": "model.gguf",
+    "qdrant_endpoint": "http://10.0.0.2:6333",
+    "qdrant_api_key": "alia-access-token-2026",
+    "collection": "benchmark_profesor",
+    "top_k": 5,
+    "chunk_size": 512,
+    "chunk_overlap": 64,
+    "source_pdf": "./RAG/Límite y Continuidad de Funciones.pdf"
+  },
+  "system_prompt": "Eres un profesor universitario y formador técnico. Tu función es enseñar, explicar, evaluar y generar material docente basándote exclusivamente en el material de estudio proporcionado como contexto. Responde siempre en el idioma en que te pregunten. Cuando respondas, referencia las secciones o partes del material cuando sea relevante. Si una pregunta trata sobre algo que no está cubierto en el material proporcionado, indícalo claramente en lugar de inventar contenido. Adapta el nivel de tus explicaciones al contexto del material: si es temario universitario, al nivel del curso correspondiente; si es material de certificación profesional, al nivel práctico que requiere el examen.",
+  "scenarios": [
+    {
+      "name": "Explicación Conceptual Básica",
+      "description": "Explicar el concepto fundamental de límite de forma clara y pedagógica, usando el contenido del PDF",
+      "question": "Acabo de empezar el tema de límites y no entiendo bien qué es eso del límite de una función en un punto. ¿Me lo puedes explicar con algún ejemplo sencillo?",
+      "max_tokens": 500,
+      "expected_output_length": "long",
+      "eval_notes": "Debe usar la idea intuitiva de la sección 1.1 (ejemplo f(x)=(x²-4)/(x-2) con tablas de valores acercándose a x=2). Debe mencionar que el punto no necesita estar en el dominio. NO debe mencionar la regla de L'Hôpital como método de resolución (solo aparece como nota al margen en el PDF, no como contenido principal)."
+    },
+    {
+      "name": "Resolución Paso a Paso",
+      "description": "Resolver un ejercicio que está en el PDF y verificar que el procedimiento es correcto",
+      "question": "¿Puedes resolverme paso a paso este límite? lim(x→1) de (x²-1)/(x-1). Es que me sale 0/0 y no sé qué hacer.",
+      "max_tokens": 400,
+      "expected_output_length": "medium",
+      "eval_notes": "Este es el Ejemplo 2-5 del PDF. Debe factorizar x²-1 = (x+1)(x-1), simplificar con el denominador (válido porque x≠1 al calcular un límite), y obtener lim(x→1)(x+1) = 2. Debe explicar por qué se puede simplificar (porque en un límite x nunca toma el valor del punto)."
+    },
+    {
+      "name": "Generación de Examen Parcial",
+      "description": "Crear preguntas de examen variadas basándose en el contenido real del temario",
+      "question": "Tengo el parcial la semana que viene. ¿Puedes prepararme 4 preguntas de examen tipo que cubran los temas principales del temario? Mezcla teoría y ejercicios prácticos.",
+      "max_tokens": 600,
+      "expected_output_length": "long",
+      "eval_notes": "Las preguntas deben cubrir contenido REAL del PDF: límites en un punto, indeterminaciones 0/0, límites en el infinito, continuidad/discontinuidad. Los ejercicios propuestos deben ser coherentes con el nivel del material (polinomios, racionales, radicales). NO debe proponer ejercicios con derivadas, integrales, series de Taylor ni L'Hôpital como herramienta de resolución."
+    },
+    {
+      "name": "Corrección de Error Conceptual",
+      "description": "Detectar y corregir pedagógicamente un error del alumno sobre continuidad",
+      "question": "Profe, en un ejercicio me preguntan si f(x) = 1/x es continua. Yo he puesto que sí porque la puedo dibujar sin levantar el lápiz. ¿Está bien?",
+      "max_tokens": 400,
+      "expected_output_length": "medium",
+      "eval_notes": "Debe corregir al alumno: f(x)=1/x NO es continua en x=0 (Ejemplo 2-22 del PDF). Debe explicar que la definición formal de continuidad requiere que lim(x→a)f(x) = f(a), y en x=0 el límite no existe (límites laterales son -∞ y +∞). Debe matizar que sí es continua en su dominio R\\{0}. El argumento del lápiz es intuitivo pero insuficiente."
+    },
+    {
+      "name": "Comparación de Tipos de Discontinuidad",
+      "description": "Explicar y contrastar los tres tipos de discontinuidad del temario",
+      "question": "Me lío con los tipos de discontinuidad. ¿Cuáles hay y en qué se diferencian? ¿Me puedes poner un ejemplo de cada una?",
+      "max_tokens": 500,
+      "expected_output_length": "long",
+      "eval_notes": "El PDF cubre tres tipos (sección 3.1): evitable (el límite existe pero ≠ f(a) o f(a) no existe), de salto (límites laterales existen pero son diferentes), y asintótica (algún límite lateral es ±∞). Debe usar los ejemplos del PDF: Ejemplo 2-26 (evitable), Ejemplo 2-27 (salto), Ejemplo 2-28 (asintótica). NO debe mencionar discontinuidad esencial de segunda especie con detalle (el PDF dice explícitamente que es poco habitual y no se centra en ella)."
+    },
+    {
+      "name": "Resumen para Repaso Rápido",
+      "description": "Condensar el tema de indeterminaciones en un resumen estructurado",
+      "question": "Mañana tengo el examen y necesito un resumen rápido de todos los tipos de indeterminaciones que hemos visto y cómo se resuelve cada uno. ¿Me lo puedes hacer?",
+      "max_tokens": 500,
+      "expected_output_length": "long",
+      "eval_notes": "El PDF cubre estas indeterminaciones: 0/0 (factorización o racionalización, sección 1.5), ±∞/±∞ (dividir por x de mayor grado o comparar órdenes de infinitud, sección 2.5.3), (+∞)-(+∞) (operar, factor común o conjugado, sección 2.5.2), 0·(±∞) (transformar a 0/0 o ∞/∞, sección 2.5.5), 1^±∞ (usar número e, sección 2.5.6). Explícitamente dice que NO se tratan 0^0 ni (±∞)^0. Si el modelo incluye estas dos últimas como contenido del curso, es alucinación."
+    },
+    {
+      "name": "Pregunta Trampa - Contenido NO en el PDF",
+      "description": "Pregunta sobre un tema que NO está en el material para detectar alucinaciones",
+      "question": "No me queda claro cómo aplicar la regla de L'Hôpital para resolver indeterminaciones. ¿Puedes explicármela con un ejemplo paso a paso?",
+      "max_tokens": 400,
+      "expected_output_length": "medium",
+      "eval_notes": "TRAMPA: La regla de L'Hôpital aparece SOLO como nota al margen en el PDF (cuadros laterales en secciones 2.5.3 y 2.5.4), indicando que se verá en el módulo de Derivación. El PDF NO la explica, NO la desarrolla y NO la usa para resolver ningún ejercicio. Un buen profesor debe decir que ese contenido no forma parte del material actual y que se verá en temas posteriores. Si el modelo explica L'Hôpital con detalle y ejemplos como si fuera parte del temario, es alucinación grave."
+    },
+    {
+      "name": "Ejercicio de Asíntotas",
+      "description": "Resolver un problema de asíntotas que combine varios conceptos del temario",
+      "question": "Necesito encontrar todas las asíntotas de la función f(x) = (x² + x + 1) / x. ¿Puedes guiarme paso a paso?",
+      "max_tokens": 500,
+      "expected_output_length": "long",
+      "eval_notes": "Este es exactamente el ejercicio de autoevaluación 24 del PDF. Asíntota vertical en x=0 (se anula el denominador). No tiene asíntota horizontal (lim→±∞ no es finito). Tiene asíntota oblicua y=x+1 tanto por la derecha como por la izquierda (Ejemplo resuelto en el solucionario, pág. 66-67). El procedimiento debe ser: calcular m=lim f(x)/x = 1, luego n=lim(f(x)-mx) = 1. Debe usar el método del PDF, no derivadas."
+    }
+  ],
+  "default_config": {
+    "iterations": 3,
+    "concurrency": 1,
+    "timeout": 90000,
+    "temperature": 0.7,
+    "streaming": true
+  }
+}

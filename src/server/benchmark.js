@@ -94,16 +94,22 @@ class BenchmarkEngine {
   /**
    * ADAPTADO: Inferencia optimizada para el stream de llama.cpp
    */
-  async runSingleInference(modelInfo, scenario, config) {
+  async runSingleInference(modelInfo, scenario, config, runId) {
     const client = orchestrator.getOpenAIClient();
     const modelName = (modelInfo.id || '').replace(/\.gguf$/i, '');
 
-    // Determinar prompts: soporte para suites duales (prompt_system + prompt_user) y suites legacy (prompt)
-    const hasPromptPair = scenario.prompt_system && scenario.prompt_user;
+    // Modo RAG: messages pre-ensamblados por ragEngine.assembleMessages
+    const hasRagMessages = Array.isArray(scenario._ragMessages);
+    // Suites duales (prompt_system + prompt_user) y suites legacy (prompt)
+    const hasPromptPair = !hasRagMessages && scenario.prompt_system && scenario.prompt_user;
     const systemPrompt = hasPromptPair ? scenario.prompt_system : null;
     const userPrompt = hasPromptPair ? scenario.prompt_user : scenario.prompt;
 
-    const runSlot = async (prompt, slotType) => {
+    const runSlot = async (promptOrMessages, slotType) => {
+      // Acepta string prompt o array de messages pre-ensamblados (RAG)
+      const messages = Array.isArray(promptOrMessages)
+        ? promptOrMessages
+        : [{ role: 'user', content: promptOrMessages }];
       const metrics = {
         slotType,
         startTime: performance.now(),
@@ -123,41 +129,96 @@ class BenchmarkEngine {
           metrics.timeout = true;
         }, config.timeout || 60000);
 
-        let firstTokenTime = null;
-        let lastTokenTime = null;
+        // Propagate kill signal from abortBenchmark → abort this fetch immediately
+        const killSignal = runId ? this.runningBenchmarks.get(runId)?.killController?.signal : null;
+        if (killSignal && !killSignal.aborted) {
+          killSignal.addEventListener('abort', () => controller.abort(), { once: true });
+        }
 
-        const stream = await client.chat.completions.create({
-          model: modelName,
-          messages: [{ role: 'user', content: prompt }],
-          max_tokens: scenario.max_tokens || 128,
-          temperature: slotType === 'system'
-            ? (config.temperature_system ?? 0.1)
-            : (config.temperature_user ?? config.temperature ?? 0.7),
-          stream: true,
-          stream_options: { include_usage: true }
-        }, { signal: controller.signal });
+        const maxTokens = scenario.max_tokens || 128;
+        const temperature = slotType === 'system'
+          ? (config.temperature_system ?? 0.1)
+          : (config.temperature_user ?? config.temperature ?? 0.7);
 
-        let finalUsage = null;
+        if (config.streaming === false) {
+          // Modo no-streaming: respuesta única JSON
+          const response = await client.chat.completions.create({
+            model: modelName,
+            messages,
+            max_tokens: maxTokens,
+            temperature,
+            stream: false
+          }, { signal: controller.signal });
+          metrics.responseText = response.choices[0]?.message?.content || '';
+          metrics.tokens = response.usage?.completion_tokens || 0;
+        } else {
+          // Modo streaming: fetch nativo + parsing SSE manual
+          // (evita conflictos del pool de conexiones del SDK con streams concurrentes)
+          const apiBase = orchestrator.getEndpoint();
+          const response = await fetch(`${apiBase}/v1/chat/completions`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer llama-rocks'
+            },
+            body: JSON.stringify({
+              model: modelName,
+              messages,
+              max_tokens: maxTokens,
+              temperature,
+              stream: true
+            }),
+            signal: controller.signal
+          });
 
-        for await (const chunk of stream) {
-          if (chunk.usage) finalUsage = chunk.usage;
-          const text = chunk.choices[0]?.delta?.content || '';
-          if (text) {
-            const now = performance.now();
-            if (!firstTokenTime) {
-              firstTokenTime = now;
-              metrics.ttft = now - metrics.startTime;
-              lastTokenTime = now;
-            } else {
-              metrics.interTokenDelays.push(now - lastTokenTime);
-              lastTokenTime = now;
+          if (!response.ok) {
+            const errText = await response.text().catch(() => '');
+            throw new Error(`HTTP ${response.status}: ${errText}`);
+          }
+
+          let firstTokenTime = null;
+          let lastTokenTime = null;
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              buffer += decoder.decode(value, { stream: true });
+              const lines = buffer.split('\n');
+              buffer = lines.pop() ?? '';
+              for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed.startsWith('data:')) continue;
+                const data = trimmed.slice(5).trim();
+                if (!data || data === '[DONE]') continue;
+                try {
+                  const chunk = JSON.parse(data);
+                  const delta = chunk.choices?.[0]?.delta;
+                  const text = delta?.content || delta?.reasoning_content;
+                  if (text) {
+                    const now = performance.now();
+                    if (firstTokenTime === null) {
+                      firstTokenTime = now;
+                      metrics.ttft = now - metrics.startTime;
+                      lastTokenTime = now;
+                    } else {
+                      metrics.interTokenDelays.push(now - lastTokenTime);
+                      lastTokenTime = now;
+                    }
+                    metrics.tokens++;
+                    metrics.responseText += text;
+                  }
+                } catch { /* chunk SSE malformado — ignorar */ }
+              }
             }
-            metrics.tokens++;
-            metrics.responseText += text;
+          } finally {
+            reader.releaseLock();
           }
         }
 
-        if (finalUsage?.completion_tokens) metrics.tokens = finalUsage.completion_tokens;
         clearTimeout(timeoutId);
       } catch (error) {
         if (error.name === 'AbortError') metrics.timeout = true;
@@ -169,7 +230,11 @@ class BenchmarkEngine {
       return metrics;
     };
 
-    if (hasPromptPair) {
+    if (hasRagMessages) {
+      // Modo RAG: slot único con messages pre-ensamblados (system+context+user)
+      const metrics = await runSlot(scenario._ragMessages, 'user');
+      return { systemMetrics: null, userMetrics: metrics, concurrent: false };
+    } else if (hasPromptPair) {
       // Lanzar ambos slots concurrentemente — simula parallel=2
       const [systemMetrics, userMetrics] = await Promise.all([
         runSlot(systemPrompt, 'system'),
@@ -187,7 +252,7 @@ class BenchmarkEngine {
   /**
    * Run benchmark scenario for a model
    */
-  async runScenario(modelId, scenario, config, progressCallback) {
+  async runScenario(modelId, scenario, config, progressCallback, runId) {
     const benchmarkLogger = createBenchmarkLogger(modelId);
     
     // Get model info from storage first
@@ -222,7 +287,12 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
       responseTexts: [],
       errors: 0,
       timeouts: 0,
-      resourceSnapshots: []
+      resourceSnapshots: [],
+      systemLatencies: [],
+      systemTtfts: [],
+      systemTokenCounts: [],
+      systemInterTokenDelays: [],
+      systemResponseTexts: []
     };
 
     // Run iterations
@@ -231,8 +301,11 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
         progressCallback({ modelId, scenario: scenario.name, iteration: i + 1, total: config.iterations });
       }
 
+      // Check abort between iterations
+      if (runId && this.runningBenchmarks.get(runId)?.aborted) break;
+
       const [resourcesBefore, gpuBefore] = await Promise.all([this.collectResourceMetrics(), getGpuMetrics()]);
-      const inferenceResult = await this.runSingleInference(modelInfo, scenario, config);
+      const inferenceResult = await this.runSingleInference(modelInfo, scenario, config, runId);
       const [resourcesAfter, gpuAfter] = await Promise.all([this.collectResourceMetrics(), getGpuMetrics()]);
 
       const userM = inferenceResult.userMetrics;
@@ -262,12 +335,11 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
         if (userM.responseText) results.responseTexts.push(userM.responseText);
 
         if (concurrent) {
-          if (!results.systemLatencies) results.systemLatencies = [];
-          if (!results.systemTtfts) results.systemTtfts = [];
-          if (!results.systemResponseTexts) results.systemResponseTexts = [];
           results.systemLatencies.push(sysM.endTime - sysM.startTime);
           if (sysM.ttft !== null) results.systemTtfts.push(sysM.ttft);
           if (sysM.interTokenDelays.length > 0) results.allInterTokenDelays.push(...sysM.interTokenDelays);
+          if (sysM.interTokenDelays.length > 0) results.systemInterTokenDelays.push(...sysM.interTokenDelays);
+          results.systemTokenCounts.push(sysM.tokens || 0);
           if (sysM.responseText) results.systemResponseTexts.push(sysM.responseText);
         }
       }
@@ -343,6 +415,15 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
       system_latency_p50: results.systemLatencies?.length > 0
         ? this.calculatePercentile([...results.systemLatencies].sort((a, b) => a - b), 50)
         : null,
+      system_tps: (() => {
+        const sysTok = results.systemTokenCounts?.reduce((s, t) => s + t, 0) ?? 0;
+        const sysTime = (results.systemLatencies?.reduce((s, t) => s + t, 0) ?? 0) / 1000;
+        return sysTime > 0 ? sysTok / sysTime : null;
+      })(),
+      system_tpot: results.systemInterTokenDelays?.length > 0
+        ? results.systemInterTokenDelays.reduce((s, t) => s + t, 0) / results.systemInterTokenDelays.length
+        : null,
+      get system_gen_tps() { return this.system_tpot > 0 ? 1000 / this.system_tpot : null; },
       concurrent_slots: results.iterations[0]?.concurrent ? 2 : 1
     };
 
@@ -380,10 +461,14 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
     });
 
     // Initialize running state
+    const killController = new AbortController();
     this.runningBenchmarks.set(runId, {
       id: runId,
       status: 'running',
-      progress: 0
+      progress: 0,
+      pauseRequested: false,
+      aborted: false,
+      killController
     });
 
     const runTask = async () => {
@@ -450,14 +535,15 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
           return await orchestrator.waitForModelUnloaded(modelId);
         };
 
-        // Helper to update progress
+        // Helper to update progress (preserves pause/abort flags)
         let _currentModel = null;
         let _currentModelIndex = 0;
         const updateProgress = () => {
           const progress = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+          const current = this.runningBenchmarks.get(runId) || {};
           this.runningBenchmarks.set(runId, {
+            ...current,
             id: runId,
-            status: 'running',
             progress,
             currentModel: _currentModel,
             currentModelIndex: _currentModelIndex,
@@ -467,6 +553,44 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
             progressCallback({ runId, progress });
           }
         };
+
+        // Helper: check for pause/abort between scenarios
+        const checkControl = async () => {
+          const state = this.runningBenchmarks.get(runId);
+          if (!state) return 'abort';
+          if (state.aborted) return 'abort';
+          if (state.pauseRequested) {
+            // Enter paused state — wait until resumed or aborted
+            const current = this.runningBenchmarks.get(runId);
+            this.runningBenchmarks.set(runId, { ...current, status: 'paused', pauseRequested: false });
+            benchmarkLogger.info('Benchmark paused', { runId });
+            await new Promise(resolve => {
+              const poll = setInterval(() => {
+                const s = this.runningBenchmarks.get(runId);
+                if (!s || s.status !== 'paused' || s.aborted) {
+                  clearInterval(poll);
+                  resolve();
+                }
+              }, 500);
+            });
+            const after = this.runningBenchmarks.get(runId);
+            if (after?.aborted) return 'abort';
+            benchmarkLogger.info('Benchmark resumed', { runId });
+          }
+          return 'continue';
+        };
+
+        // Inicializar RAG engine si la suite tiene config RAG
+        let ragEngine = null;
+        if (suite.rag) {
+          const { RagEngine } = await import('./rag/ragEngine.js');
+          ragEngine = new RagEngine(suite.rag);
+          benchmarkLogger.info('RAG mode activado', {
+            collection: suite.rag.collection,
+            topK: suite.rag.top_k,
+            embeddingsModel: suite.rag.embeddings_model
+          });
+        }
 
         // Run benchmarks for each model sequentially
         for (let i = 0; i < modelIds.length; i++) {
@@ -525,13 +649,51 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
 
           // Run each scenario in the suite
           for (const scenario of suite.scenarios) {
+            // Check pause/abort before starting each scenario
+            if ((await checkControl()) === 'abort') break;
+
             try {
+              // Modo RAG: recuperar contexto antes de la inferencia
+              let augScenario = scenario;
+              let ragResult = null;
+              if (ragEngine && scenario.question) {
+                try {
+                  ragResult = await ragEngine.retrieve(scenario.question);
+                  const messages = ragEngine.assembleMessages(
+                    suite.system_prompt || '',
+                    ragResult.chunks,
+                    scenario.question
+                  );
+                  augScenario = { ...scenario, _ragMessages: messages };
+                  benchmarkLogger.info(`RAG: ${ragResult.chunks.length} chunks en ${ragResult.latencyMs}ms`, {
+                    scenario: scenario.name
+                  });
+                } catch (ragErr) {
+                  benchmarkLogger.error('RAG retrieval falló — ejecutando sin contexto', {
+                    scenario: scenario.name,
+                    error: ragErr.message
+                  });
+                }
+              }
+
               const result = await this.runScenario(
                 modelId,
-                scenario,
+                augScenario,
                 config,
-                progressCallback
+                progressCallback,
+                runId
               );
+
+              // Adjuntar chunks RAG al raw_data para auditoría
+              if (ragResult) {
+                result.raw.ragChunks = ragResult.chunks.map(c => ({
+                  score: +c.score.toFixed(4),
+                  pdf_name: c.payload.pdf_name,
+                  page: c.payload.page,
+                  text: c.payload.text
+                }));
+                result.raw.ragRetrievalMs = ragResult.latencyMs;
+              }
 
               // Save result
               const resultRecord = {
@@ -576,16 +738,20 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
           }
         }
 
-        // Update run as completed
+        // Check if aborted
+        const finalState = this.runningBenchmarks.get(runId);
+        const wasAborted = finalState?.aborted;
+
+        // Update run as completed or aborted
         storage.updateBenchmarkRun(runId, {
-          status: 'completed',
+          status: wasAborted ? 'aborted' : 'completed',
           completed_at: Date.now()
         });
 
         this.runningBenchmarks.set(runId, {
           id: runId,
-          status: 'completed',
-          progress: 100
+          status: wasAborted ? 'aborted' : 'completed',
+          progress: wasAborted ? finalState?.progress : 100
         });
 
         benchmarkLogger.info('Benchmark run completed', { runId, resultsCount: allResults.length });
@@ -628,6 +794,34 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
    */
   getBenchmarkStatus(runId) {
     return this.runningBenchmarks.get(runId);
+  }
+
+  pauseBenchmark(runId) {
+    const state = this.runningBenchmarks.get(runId);
+    if (state && state.status === 'running') {
+      this.runningBenchmarks.set(runId, { ...state, pauseRequested: true });
+      return true;
+    }
+    return false;
+  }
+
+  resumeBenchmark(runId) {
+    const state = this.runningBenchmarks.get(runId);
+    if (state && state.status === 'paused') {
+      this.runningBenchmarks.set(runId, { ...state, status: 'running', pauseRequested: false });
+      return true;
+    }
+    return false;
+  }
+
+  abortBenchmark(runId) {
+    const state = this.runningBenchmarks.get(runId);
+    if (state && (state.status === 'running' || state.status === 'paused')) {
+      state.killController?.abort(); // Mata el fetch activo inmediatamente
+      this.runningBenchmarks.set(runId, { ...state, status: 'running', aborted: true, pauseRequested: false });
+      return true;
+    }
+    return false;
   }
 }
 

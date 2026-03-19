@@ -35,6 +35,9 @@ export const benchmarksAPI = {
   exportCSV: (id) => api.get(`/benchmarks/runs/${id}/export/csv`, { responseType: 'blob' }),
   logs: (id, limit = 100) => api.get(`/benchmarks/runs/${id}/logs`, { params: { limit } }),
   status: (id) => api.get(`/benchmarks/runs/${id}/status`),
+  pause: (id) => api.post(`/benchmarks/runs/${id}/pause`),
+  resume: (id) => api.post(`/benchmarks/runs/${id}/resume`),
+  abort: (id) => api.post(`/benchmarks/runs/${id}/abort`),
   deleteRun: (id) => api.delete(`/benchmarks/runs/${id}`)
 };
 
@@ -49,7 +52,8 @@ export const settingsAPI = {
 // System API
 export const systemAPI = {
   health: () => api.get('/system/health'),
-  stats: () => api.get('/system/stats')
+  stats: () => api.get('/system/stats'),
+  statsHealth: () => api.get('/system/stats-health')
 };
 
 // Cache API
@@ -66,6 +70,12 @@ export const cacheAPI = {
     const response = await api.get('/cache/models');
     return response.data;
   }
+};
+
+// RAG API
+export const ragAPI = {
+  ingest: (suiteName, skipIngest = false) =>
+    api.post('/rag/ingest', { suiteName, skipIngest }, { timeout: 300000 })
 };
 
 export default api;

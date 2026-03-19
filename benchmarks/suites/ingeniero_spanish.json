@@ -1,0 +1,74 @@
+{
+  "name": "ingeniero_spanish",
+  "description": "Suite de benchmark para candidatos al rol Ingeniero. Escenarios en pares concurrentes: slot_system simula al orquestador con JSON, slot_user simula al usuario con lenguaje natural. Evalúa generación de código, debugging, infraestructura y razonamiento técnico.",
+  "version": "1.2.0",
+  "concurrent_slots": 2,
+  "system_prompt": "Eres el Ingeniero de ALIA, un sistema de IA local soberano. Tu función es generar código, diagnosticar problemas y diseñar infraestructura. Reglas estrictas: responde solo en el idioma de la pregunta, sé directo y conciso sin preámbulos ni despedidas, no repitas la pregunta, no inventes datos. Para el slot de sistema: responde exclusivamente en JSON válido con los campos solicitados, sin markdown ni texto envolvente. Para el slot de usuario: responde en lenguaje natural estructurado, incluye el código necesario sin explicar obviedades.",
+  "scenarios": [
+    {
+      "name": "Generación de Código Python",
+      "description": "Producir código funcional a partir de una especificación",
+      "prompt_system": "{\"action\": \"generate_code\", \"language\": \"python\", \"spec\": \"función que reciba una lista de diccionarios con claves 'host' y 'port', compruebe conectividad TCP con timeout de 2 segundos, y devuelva un dict con host:port como clave y bool como valor\", \"constraints\": [\"stdlib only\", \"type hints\", \"docstring\"], \"response_format\": \"json\", \"fields\": [\"code\", \"usage_example\"]}",
+      "prompt_user": "Necesito una función en Python que reciba una lista de hosts con sus puertos y compruebe si están accesibles por TCP, con un timeout de 2 segundos. Solo librería estándar, con type hints y docstring.",
+      "max_tokens": 512,
+      "expected_output_length": "medium"
+    },
+    {
+      "name": "Debugging y Corrección",
+      "description": "Identificar y corregir errores en código existente",
+      "prompt_system": "{\"action\": \"debug\", \"language\": \"python\", \"code\": \"import json\\ndef parse_config(path):\\n    with open(path) as f:\\n        data = json.load(f)\\n    port = data['server']['port']\\n    host = data['server']['host']\\n    return f'http://{host}:{port}'\\n\\nurl = parse_config('/etc/app/config.json')\\nprint(url)\", \"error\": \"KeyError: 'server' en algunos entornos; además el servicio a veces usa HTTPS\", \"response_format\": \"json\", \"fields\": [\"bugs_found\", \"corrected_code\"]}",
+      "prompt_user": "Tengo este script en Python que lee un config.json y arma la URL del servicio, pero peta con KeyError: 'server' y no contempla HTTPS. Encuentra los fallos y corrígelo:\n\nimport json\ndef parse_config(path):\n    with open(path) as f:\n        data = json.load(f)\n    port = data['server']['port']\n    host = data['server']['host']\n    return f'http://{host}:{port}'\n\nurl = parse_config('/etc/app/config.json')\nprint(url)",
+      "max_tokens": 512,
+      "expected_output_length": "medium"
+    },
+    {
+      "name": "Consulta SQL",
+      "description": "Traducir requisito de negocio a query SQL",
+      "prompt_system": "{\"action\": \"generate_sql\", \"dialect\": \"postgresql\", \"schema\": {\"users\": [\"id SERIAL PK\", \"name TEXT\", \"created_at TIMESTAMPTZ\"], \"orders\": [\"id SERIAL PK\", \"user_id INT FK(users.id)\", \"total NUMERIC(10,2)\", \"status TEXT\", \"created_at TIMESTAMPTZ\"]}, \"requirement\": \"top 5 usuarios por gasto total en los últimos 90 días, solo pedidos completados, con número de pedidos y ticket medio\", \"response_format\": \"json\", \"fields\": [\"query\"]}",
+      "prompt_user": "Tablas: users (id, name, created_at) y orders (id, user_id, total, status, created_at) en PostgreSQL. Query para top 5 usuarios por gasto en últimos 90 días, solo status 'completed', con número de pedidos y ticket medio.",
+      "max_tokens": 384,
+      "expected_output_length": "medium"
+    },
+    {
+      "name": "Dockerfile y Compose",
+      "description": "Generar configuración de contenedores",
+      "prompt_system": "{\"action\": \"generate_infra\", \"type\": \"docker-compose\", \"spec\": {\"service\": \"FastAPI app\", \"python_version\": \"3.12\", \"dependencies\": [\"fastapi\", \"uvicorn\", \"sqlalchemy\", \"asyncpg\"], \"database\": \"postgres:16\", \"requirements\": [\"healthcheck\", \"volumen persistente para DB\", \"red interna\", \"restart policy\"]}, \"response_format\": \"json\", \"fields\": [\"dockerfile\", \"compose_yaml\"]}",
+      "prompt_user": "Dockerfile y docker-compose.yml para app FastAPI Python 3.12 con PostgreSQL 16. Deps: fastapi, uvicorn, sqlalchemy, asyncpg. Requisitos: healthcheck, volumen persistente, red interna, restart policy.",
+      "max_tokens": 768,
+      "expected_output_length": "long"
+    },
+    {
+      "name": "Code Review",
+      "description": "Identificar problemas de seguridad y rendimiento",
+      "prompt_system": "{\"action\": \"review\", \"language\": \"python\", \"code\": \"from flask import Flask, request\\nimport sqlite3, os\\n\\napp = Flask(__name__)\\nDB = os.getenv('DB_PATH', 'app.db')\\n\\n@app.route('/user')\\ndef get_user():\\n    uid = request.args.get('id')\\n    conn = sqlite3.connect(DB)\\n    cur = conn.cursor()\\n    cur.execute(f\\\"SELECT * FROM users WHERE id = {uid}\\\")\\n    row = cur.fetchone()\\n    conn.close()\\n    return {'user': row}\\n\\napp.run(debug=True, host='0.0.0.0')\", \"response_format\": \"json\", \"fields\": [\"issues\", \"recommendations\"]}",
+      "prompt_user": "Problemas de seguridad y rendimiento de este endpoint Flask:\n\nfrom flask import Flask, request\nimport sqlite3, os\napp = Flask(__name__)\nDB = os.getenv('DB_PATH', 'app.db')\n@app.route('/user')\ndef get_user():\n    uid = request.args.get('id')\n    conn = sqlite3.connect(DB)\n    cur = conn.cursor()\n    cur.execute(f\"SELECT * FROM users WHERE id = {uid}\")\n    row = cur.fetchone()\n    conn.close()\n    return {'user': row}\napp.run(debug=True, host='0.0.0.0')",
+      "max_tokens": 512,
+      "expected_output_length": "medium"
+    },
+    {
+      "name": "Diagnóstico de Infraestructura",
+      "description": "Razonar sobre un problema de infra a partir de síntomas y logs",
+      "prompt_system": "{\"action\": \"diagnose\", \"context\": {\"service\": \"nginx reverse proxy\", \"symptom\": \"502 Bad Gateway intermitente\", \"infra\": \"docker-compose con nginx + 3 réplicas app node:20\", \"logs_nginx\": \"upstream prematurely closed connection while reading response header\", \"logs_app\": \"FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory\", \"metrics\": {\"memory_app_containers\": \"950Mi/1Gi\", \"cpu\": \"12%\"}}, \"response_format\": \"json\", \"fields\": [\"root_cause\", \"fix_steps\"]}",
+      "prompt_user": "Nginx reverse proxy con 502 intermitentes delante de 3 contenedores Node.js. Logs nginx: 'upstream prematurely closed connection'. Logs app: 'JavaScript heap out of memory'. RAM contenedores: 950Mi/1Gi, CPU: 12%. Causa y solución.",
+      "max_tokens": 512,
+      "expected_output_length": "medium"
+    },
+    {
+      "name": "Script Bash",
+      "description": "Generar script de automatización operativa",
+      "prompt_system": "{\"action\": \"generate_code\", \"language\": \"bash\", \"spec\": \"script que reciba un directorio, busque .log de más de 7 días, los comprima en tar.gz con fecha en el nombre, y borre originales solo si el tar se creó bien\", \"constraints\": [\"set -euo pipefail\", \"validar argumento\", \"logging a stderr\"], \"response_format\": \"json\", \"fields\": [\"script\"]}",
+      "prompt_user": "Script bash: recibe directorio, busca .log >7 días, los mete en tar.gz con fecha en el nombre, borra originales solo si el tar se creó bien. set -euo pipefail, validación de args, logging a stderr.",
+      "max_tokens": 512,
+      "expected_output_length": "medium"
+    }
+  ],
+  "default_config": {
+    "iterations": 3,
+    "concurrency": 2,
+    "timeout": 120000,
+    "temperature": 0.3,
+    "temperature_system": 0.1,
+    "temperature_user": 0.3,
+    "streaming": true
+  }
+}

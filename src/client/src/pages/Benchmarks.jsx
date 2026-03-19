@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { modelsAPI, benchmarksAPI } from '../utils/api';
+import { modelsAPI, benchmarksAPI, ragAPI, systemAPI } from '../utils/api';
 
 function Benchmarks() {
   const [models, setModels] = useState([]);
@@ -18,6 +18,8 @@ function Benchmarks() {
     temperature_user: 0.7,
     streaming: true
   });
+  const [ragLoading, setRagLoading] = useState(false);
+  const [ragStatus, setRagStatus] = useState(null); // { success, message, chunks, pages }
   const [loading, setLoading] = useState(false);
   const [modelsLoading, setModelsLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -28,11 +30,24 @@ function Benchmarks() {
   const [runCurrentModel, setRunCurrentModel] = useState(null);
   const [runModelIndex, setRunModelIndex] = useState(null);
   const [runTotalModels, setRunTotalModels] = useState(null);
+  const [runPauseRequested, setRunPauseRequested] = useState(false);
+  const [aborting, setAborting] = useState(false);
+  const [statsAvailable, setStatsAvailable] = useState(null); // null=checking, true, false
+
+  const checkStatsEndpoint = async () => {
+    try {
+      const res = await systemAPI.statsHealth();
+      setStatsAvailable(res.data.available);
+    } catch {
+      setStatsAvailable(false);
+    }
+  };
 
   useEffect(() => {
     loadModels();
     loadSuites();
     loadRecentRuns();
+    checkStatsEndpoint();
     
     // Auto-refresh models and runs every 3 seconds
     const interval = setInterval(() => {
@@ -55,13 +70,19 @@ function Benchmarks() {
         if (res.data.currentModel != null) setRunCurrentModel(res.data.currentModel);
         if (res.data.currentModelIndex != null) setRunModelIndex(res.data.currentModelIndex);
         if (res.data.totalModels != null) setRunTotalModels(res.data.totalModels);
+        setRunPauseRequested(!!res.data.pauseRequested);
 
-        // Stop polling when not running
-        if (res.data.status !== 'running') {
+        // Stop polling when terminal state
+        if (!['running', 'paused'].includes(res.data.status)) {
           clearInterval(interval);
           loadRecentRuns();
           if (res.data.status === 'completed') {
             setSuccess('✅ Benchmark completed!');
+          } else if (res.data.status === 'aborted') {
+            setAborting(false);
+            try { await benchmarksAPI.deleteRun(currentRunId); } catch {}
+            setCurrentRunId(null);
+            setRunStatus(null);
           } else if (res.data.status === 'failed') {
             setError('❌ Benchmark failed. Check logs for details.');
           }
@@ -91,10 +112,13 @@ function Benchmarks() {
       const res = await benchmarksAPI.getSuites();
       setSuites(res.data.suites);
       if (res.data.suites.length > 0) {
-        setSelectedSuite(res.data.suites[0].name);
-        // Select all scenarios by default
-        if (res.data.suites[0].scenarios) {
-          setSelectedScenarios(res.data.suites[0].scenarios.map(s => s.name));
+        const first = res.data.suites[0];
+        setSelectedSuite(first.name);
+        if (first.scenarios) {
+          setSelectedScenarios(first.scenarios.map(s => s.name));
+        }
+        if (first.default_config) {
+          setConfig(prev => ({ ...prev, ...first.default_config }));
         }
       }
     } catch (err) {
@@ -135,8 +159,10 @@ function Benchmarks() {
     setSelectedSuite(suiteName);
     const suite = suites.find(s => s.name === suiteName);
     if (suite?.scenarios) {
-      // Select all scenarios by default when switching suites
       setSelectedScenarios(suite.scenarios.map(s => s.name));
+    }
+    if (suite?.default_config) {
+      setConfig(prev => ({ ...prev, ...suite.default_config }));
     }
   };
 
@@ -185,6 +211,18 @@ function Benchmarks() {
       return;
     }
 
+    // Verificar stats endpoint antes de lanzar
+    try {
+      const statsRes = await systemAPI.statsHealth();
+      if (!statsRes.data.available) {
+        setError('⚠️ El servidor de métricas GPU (aion:9999) no está disponible. Comprueba que el servicio está activo antes de lanzar el test.');
+        return;
+      }
+    } catch {
+      setError('⚠️ No se pudo verificar el servidor de métricas GPU. Comprueba la conexión con aion:9999.');
+      return;
+    }
+
     setLoading(true);
     setError(null);
 
@@ -212,20 +250,84 @@ function Benchmarks() {
     }
   };
 
+  const handlePauseResume = async () => {
+    if (!currentRunId) return;
+    try {
+      if (runStatus === 'paused') {
+        await benchmarksAPI.resume(currentRunId);
+        setRunStatus('running');
+      } else {
+        await benchmarksAPI.pause(currentRunId);
+        setRunPauseRequested(true);
+      }
+    } catch (err) {
+      setError(err.response?.data?.error || err.message);
+    }
+  };
+
+  const handleAbort = async () => {
+    if (!currentRunId) return;
+    setAborting(true);
+    try {
+      await benchmarksAPI.abort(currentRunId);
+    } catch (err) {
+      setAborting(false);
+      setError(err.response?.data?.error || err.message);
+    }
+  };
+
+  const handleIngest = async (skipIngest = false) => {
+    if (!selectedSuite) return;
+    setRagLoading(true);
+    setRagStatus(null);
+    try {
+      const res = await ragAPI.ingest(selectedSuite, skipIngest);
+      if (res.data.skipped) {
+        setRagStatus({ success: true, message: 'Ingesta omitida — usando colección existente.' });
+      } else {
+        setRagStatus({
+          success: true,
+          message: `PDF ingested: ${res.data.pdfName} — ${res.data.chunks} chunks, ${res.data.pages} págs, dim=${res.data.vectorDim}`
+        });
+      }
+    } catch (err) {
+      setRagStatus({ success: false, message: err.response?.data?.error || err.message });
+    } finally {
+      setRagLoading(false);
+    }
+  };
+
   const currentSuite = suites.find(s => s.name === selectedSuite);
 
   return (
     <div>
+      {aborting && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
+          <div style={{ background: 'white', padding: '32px 40px', borderRadius: '10px', textAlign: 'center', boxShadow: '0 8px 32px rgba(0,0,0,0.3)', minWidth: '280px' }}>
+            <div style={{ fontSize: '2rem', marginBottom: '12px' }}>⏹</div>
+            <div style={{ fontWeight: 700, fontSize: '1.1rem', marginBottom: '8px' }}>Abortando test...</div>
+            <div style={{ color: '#666', fontSize: '0.9rem' }}>Esperando a que finalice la subprueba actual</div>
+          </div>
+        </div>
+      )}
       <h2 style={{ marginBottom: '1.5rem', fontSize: '2rem' }}>Benchmarks</h2>
 
+      {statsAvailable === false && (
+        <div style={{ background: '#fff3cd', border: '1px solid #ffc107', borderRadius: '6px', padding: '10px 16px', marginBottom: '1rem', color: '#856404', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          ⚠️ <strong>Servidor de métricas GPU no disponible</strong> — aion:9999 no responde. No se podrán recoger datos de CPU/GPU/VRAM durante el test. Comprueba que el servicio está activo.
+        </div>
+      )}
       {error && <div className="error">{error}</div>}
       {success && <div className="success">{success}</div>}
 
-      {currentRunId && runStatus === 'running' && (
+      {currentRunId && ['running', 'paused'].includes(runStatus) && (
         <div className="card" style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          <div className="spinner" aria-label="Benchmark running" />
+          {runStatus === 'running' && <div className="spinner" aria-label="Benchmark running" />}
+          {runStatus === 'paused' && <span style={{ fontSize: '1.5rem' }}>⏸</span>}
           <div style={{ flex: 1 }}>
-            <h4 style={{ marginBottom: '0.5rem' }}>Benchmark running...</h4>
+            <h4 style={{ marginBottom: '0.5rem' }}>
+              {runStatus === 'paused' ? 'Benchmark pausado' : 'Benchmark running...'}
+            </h4>
             {runCurrentModel && (
               <p style={{ marginBottom: '0.5rem', color: '#2c3e50' }}>
                 Testing <strong>{runCurrentModel}</strong>
@@ -236,11 +338,35 @@ function Benchmarks() {
                 )}
               </p>
             )}
+            {runPauseRequested && runStatus === 'running' && (
+              <p style={{ marginBottom: '0.5rem', color: '#f39c12', fontSize: '0.85rem', fontStyle: 'italic' }}>
+                ⏳ Pausa pendiente — se aplicará al finalizar la subprueba actual
+              </p>
+            )}
             <p style={{ marginBottom: '0.5rem', color: '#7f8c8d', fontSize: '0.85rem' }}>Run ID: <code>{currentRunId}</code></p>
             <div className="progress-bar-container">
               <div className="progress-bar-fill" style={{ width: `${runProgress || 5}%` }} />
             </div>
             <p style={{ marginTop: '0.5rem', color: '#3498db', fontWeight: 'bold' }}>{runProgress || 0}% completed</p>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', flexShrink: 0 }}>
+            <button
+              type="button"
+              className="btn btn-sm"
+              style={{ background: runStatus === 'paused' ? '#27ae60' : '#f39c12', color: 'white', minWidth: '110px' }}
+              onClick={handlePauseResume}
+            >
+              {runStatus === 'paused' ? '▶ Resume TEST' : '⏸ Pause TEST'}
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm"
+              style={{ background: '#e74c3c', color: 'white', minWidth: '110px', opacity: aborting ? 0.6 : 1 }}
+              onClick={handleAbort}
+              disabled={aborting}
+            >
+              {aborting ? '⏳ Aborting...' : '⏹ Abort TEST'}
+            </button>
           </div>
         </div>
       )}
@@ -375,7 +501,7 @@ function Benchmarks() {
               required
             >
               {suites.map(suite => (
-                <option key={suite.name} value={suite.name}>
+                <option key={suite.name} value={suite.name} style={{ fontWeight: 'bold' }}>
                   {suite.name} - {suite.description}
                 </option>
               ))}
@@ -383,6 +509,7 @@ function Benchmarks() {
           </div>
 
           {currentSuite && (
+            <>
             <div style={{ marginTop: '1rem', padding: '1rem', background: '#f8f9fa', borderRadius: '4px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
                 <h4 style={{ marginBottom: 0 }}>Suite Details</h4>
@@ -406,6 +533,19 @@ function Benchmarks() {
               </div>
               <p style={{ marginBottom: '0.5rem', color: '#7f8c8d' }}>
                 {currentSuite.description}
+                {currentSuite.rag && (
+                  <span style={{
+                    marginLeft: '0.75rem',
+                    padding: '2px 8px',
+                    borderRadius: '4px',
+                    background: '#d1ecf1',
+                    color: '#0c5460',
+                    fontSize: '0.75rem',
+                    fontWeight: 700
+                  }}>
+                    RAG
+                  </span>
+                )}
               </p>
               <p style={{ marginBottom: '1rem' }}>
                 <strong>Available Scenarios:</strong> {currentSuite.scenarios?.length || 0} | 
@@ -455,7 +595,14 @@ function Benchmarks() {
                         <div style={{ fontSize: '0.85rem', color: '#7f8c8d', marginBottom: '0.25rem' }}>
                           {scenario.description}
                         </div>
-                        {scenario.prompt_system && scenario.prompt_user ? (
+                        {scenario.question ? (
+                          <div style={{ fontSize: '0.8rem', color: '#95a5a6' }}>
+                            <span style={{ fontWeight: 600, color: '#0c5460' }}>pregunta: </span>
+                            <span style={{ fontStyle: 'italic' }}>
+                              "{scenario.question.substring(0, 100)}{scenario.question.length > 100 ? '...' : ''}"
+                            </span>
+                          </div>
+                        ) : scenario.prompt_system && scenario.prompt_user ? (
                           <>
                             <div style={{ fontSize: '0.8rem', color: '#95a5a6', marginBottom: '0.15rem' }}>
                               <span style={{ fontWeight: 600, color: '#7f8c8d' }}>system: </span>
@@ -484,6 +631,52 @@ function Benchmarks() {
                 </div>
               )}
             </div>
+
+            {currentSuite.rag && (
+              <div style={{ marginTop: '1rem', padding: '1rem', background: '#e8f4f8', borderRadius: '4px', borderLeft: '4px solid #0c5460' }}>
+                <div style={{ fontWeight: 700, color: '#0c5460', marginBottom: '0.5rem' }}>
+                  RAG — Ingesta de PDF
+                </div>
+                <div style={{ fontSize: '0.85rem', color: '#555', marginBottom: '0.75rem' }}>
+                  Colección: <strong>{currentSuite.rag.collection}</strong> &nbsp;·&nbsp;
+                  top_k: <strong>{currentSuite.rag.top_k}</strong> &nbsp;·&nbsp;
+                  chunk_size: <strong>{currentSuite.rag.chunk_size}</strong> tokens &nbsp;·&nbsp;
+                  PDF: <code style={{ fontSize: '0.8rem' }}>{currentSuite.rag.source_pdf}</code>
+                </div>
+                {ragStatus && (
+                  <div style={{
+                    marginBottom: '0.75rem',
+                    padding: '0.5rem 0.75rem',
+                    borderRadius: '4px',
+                    background: ragStatus.success ? '#d4edda' : '#f8d7da',
+                    color: ragStatus.success ? '#155724' : '#721c24',
+                    fontSize: '0.85rem'
+                  }}>
+                    {ragStatus.message}
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    style={{ background: '#0c5460', color: 'white' }}
+                    onClick={() => handleIngest(false)}
+                    disabled={ragLoading}
+                  >
+                    {ragLoading ? 'Ingesting...' : 'Ingest PDF'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-secondary"
+                    onClick={() => handleIngest(true)}
+                    disabled={ragLoading}
+                  >
+                    Skip (usar colección existente)
+                  </button>
+                </div>
+              </div>
+            )}
+            </>
           )}
         </div>
 
@@ -497,6 +690,18 @@ function Benchmarks() {
             <p style={{ color: '#e74c3c' }}>No models configured. Add models in the Models tab first.</p>
           ) : (
             <div>
+              <div style={{ marginBottom: '0.75rem', paddingBottom: '0.75rem', borderBottom: '1px solid #e9ecef' }}>
+                <input
+                  type="checkbox"
+                  id="select-all-models"
+                  checked={models.length > 0 && selectedModels.length === models.length}
+                  onChange={(e) => setSelectedModels(e.target.checked ? models.map(m => m.id) : [])}
+                  style={{ width: '18px', height: '18px', flexShrink: 0, verticalAlign: 'middle' }}
+                />
+                <label htmlFor="select-all-models" style={{ cursor: 'pointer', marginLeft: '0.5rem', fontWeight: 600 }}>
+                  Select all models
+                </label>
+              </div>
               {models.map(model => {
                 const isRunning = model.status === 'running';
                 return (

@@ -12,6 +12,8 @@ function Results() {
   const [runProgress, setRunProgress] = useState(0);
   const [initialRunParam, setInitialRunParam] = useState(null);
   const [expandedCells, setExpandedCells] = useState(new Set());
+  const [runPauseRequested, setRunPauseRequested] = useState(false);
+  const [aborting, setAborting] = useState(false);
 
   useEffect(() => {
     // Parse ?run=<runId>
@@ -40,10 +42,19 @@ function Results() {
         if (res.data.progress !== null && res.data.progress !== undefined) {
           setRunProgress(res.data.progress);
         }
+        setRunPauseRequested(!!res.data.pauseRequested);
         if (res.data.status === 'completed') {
           clearInterval(interval);
           loadResults(selectedRun);
           loadRuns();
+        }
+        if (res.data.status === 'aborted') {
+          clearInterval(interval);
+          setAborting(false);
+          try { await benchmarksAPI.deleteRun(selectedRun); } catch {}
+          await loadRuns();
+          setResults([]);
+          setRunStatus(null);
         }
         if (res.data.status === 'failed') {
           clearInterval(interval);
@@ -74,6 +85,32 @@ function Results() {
       setError(err.response?.data?.error || err.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handlePauseResume = async () => {
+    if (!selectedRun) return;
+    try {
+      if (runStatus === 'paused') {
+        await benchmarksAPI.resume(selectedRun);
+        setRunStatus('running');
+      } else {
+        await benchmarksAPI.pause(selectedRun);
+        setRunPauseRequested(true);
+      }
+    } catch (err) {
+      setError(err.response?.data?.error || err.message);
+    }
+  };
+
+  const handleAbort = async () => {
+    if (!selectedRun) return;
+    setAborting(true);
+    try {
+      await benchmarksAPI.abort(selectedRun);
+    } catch (err) {
+      setAborting(false);
+      setError(err.response?.data?.error || err.message);
     }
   };
 
@@ -149,12 +186,17 @@ function Results() {
     const scenarios = [...new Set(results.map(r => r.scenario))];
     const models = [...new Set(results.map(r => r.model_alias || r.model_id))];
     const lookup = {};
+    const ragByScenario = {};
     results.forEach(r => {
       const mk = r.model_alias || r.model_id;
       if (!lookup[r.scenario]) lookup[r.scenario] = {};
       lookup[r.scenario][mk] = { user: r.lastResponse ?? null, system: r.lastSystemResponse ?? null };
+      // RAG chunks are per-scenario (same for all models) — keep first occurrence
+      if (r.ragChunks && !ragByScenario[r.scenario]) {
+        ragByScenario[r.scenario] = { chunks: r.ragChunks, latencyMs: r.ragRetrievalMs ?? null };
+      }
     });
-    return { scenarios, models, lookup };
+    return { scenarios, models, lookup, ragByScenario };
   };
 
   // Aggregate results by model for comparison
@@ -248,20 +290,56 @@ function Results() {
 
   return (
     <div>
+      {aborting && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
+          <div style={{ background: 'white', padding: '32px 40px', borderRadius: '10px', textAlign: 'center', boxShadow: '0 8px 32px rgba(0,0,0,0.3)', minWidth: '280px' }}>
+            <div style={{ fontSize: '2rem', marginBottom: '12px' }}>⏹</div>
+            <div style={{ fontWeight: 700, fontSize: '1.1rem', marginBottom: '8px' }}>Abortando test...</div>
+            <div style={{ color: '#666', fontSize: '0.9rem' }}>Esperando a que finalice la subprueba actual</div>
+          </div>
+        </div>
+      )}
       <h2 style={{ marginBottom: '1.5rem', fontSize: '2rem' }}>Results</h2>
 
       {error && <div className="error">{error}</div>}
 
-      {runStatus === 'running' && (
+      {['running', 'paused'].includes(runStatus) && (
         <div className="card" style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          <div className="spinner" aria-label="Benchmark running" />
+          {runStatus === 'running' && <div className="spinner" aria-label="Benchmark running" />}
+          {runStatus === 'paused' && <span style={{ fontSize: '1.5rem' }}>⏸</span>}
           <div style={{ flex: 1 }}>
-            <h4 style={{ marginBottom: '0.5rem' }}>Benchmark running...</h4>
+            <h4 style={{ marginBottom: '0.5rem' }}>
+              {runStatus === 'paused' ? 'Benchmark pausado' : 'Benchmark running...'}
+            </h4>
+            {runPauseRequested && runStatus === 'running' && (
+              <p style={{ marginBottom: '0.5rem', color: '#f39c12', fontSize: '0.85rem', fontStyle: 'italic' }}>
+                ⏳ Pausa pendiente — se aplicará al finalizar la subprueba actual
+              </p>
+            )}
             <p style={{ marginBottom: '0.5rem', color: '#7f8c8d' }}>Run ID: <code>{selectedRun}</code></p>
             <div className="progress-bar-container">
               <div className="progress-bar-fill" style={{ width: `${runProgress || 5}%` }} />
             </div>
             <p style={{ marginTop: '0.5rem', color: '#3498db', fontWeight: 'bold' }}>{runProgress || 0}% completed</p>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', flexShrink: 0 }}>
+            <button
+              type="button"
+              className="btn btn-sm"
+              style={{ background: runStatus === 'paused' ? '#27ae60' : '#f39c12', color: 'white', minWidth: '110px' }}
+              onClick={handlePauseResume}
+            >
+              {runStatus === 'paused' ? '▶ Resume TEST' : '⏸ Pause TEST'}
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm"
+              style={{ background: '#e74c3c', color: 'white', minWidth: '110px', opacity: aborting ? 0.6 : 1 }}
+              onClick={handleAbort}
+              disabled={aborting}
+            >
+              {aborting ? '⏳ Aborting...' : '⏹ Abort TEST'}
+            </button>
           </div>
         </div>
       )}
@@ -708,60 +786,116 @@ function Results() {
                     </tr>
                   </thead>
                   <tbody>
-                    {results.map((result, idx) => (
-                      <tr key={idx}>
-                        <td><strong>{result.model_alias || result.model_id}</strong></td>
-                        <td>
-                          <span style={{
-                            display: 'inline-block',
-                            padding: '2px 8px',
-                            borderRadius: '4px',
-                            background: '#ecf0f1',
-                            fontSize: '0.85rem'
-                          }}>
-                            {result.scenario}
-                          </span>
-                        </td>
-                        <td>
-                          <span style={{ fontWeight: 'bold', color: '#27ae60' }}>
-                            {result.tps?.toFixed(2) || '-'}
-                          </span>
-                        </td>
-                        <td>{result.ttft?.toFixed(0) || '-'}</td>
-                        <td>{result.tpot?.toFixed(2) || '-'}</td>
-                        <td>
-                          <span style={{ fontWeight: 'bold', color: '#e67e22' }}>
-                            {result.gen_tps?.toFixed(2) || '-'}
-                          </span>
-                        </td>
-                        <td>{result.latency_p50?.toFixed(0) || '-'}</td>
-                        <td>{result.latency_p95?.toFixed(0) || '-'}</td>
-                        <td>{result.latency_p99?.toFixed(0) || '-'}</td>
-                        <td>
-                          <span style={{
-                            display: 'inline-block',
-                            padding: '2px 8px',
-                            borderRadius: '4px',
-                            fontWeight: 'bold',
-                            background: (result.error_rate || 0) > 5 ? '#e74c3c' : '#27ae60',
-                            color: 'white',
-                            fontSize: '0.85rem'
-                          }}>
-                            {result.error_rate?.toFixed(1) || '0'}%
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
+                    {results.map((result, idx) => {
+                      const isDual = result.concurrent_slots === 2;
+                      return (
+                        <React.Fragment key={idx}>
+                          <tr>
+                            <td><strong>{result.model_alias || result.model_id}</strong></td>
+                            <td>
+                              <span style={{
+                                display: 'inline-block',
+                                padding: '2px 8px',
+                                borderRadius: '4px',
+                                background: '#ecf0f1',
+                                fontSize: '0.85rem'
+                              }}>
+                                {result.scenario}
+                              </span>
+                              {isDual && (
+                                <span style={{
+                                  display: 'inline-block',
+                                  marginLeft: '6px',
+                                  padding: '1px 6px',
+                                  borderRadius: '4px',
+                                  background: '#8e44ad',
+                                  color: 'white',
+                                  fontSize: '0.72rem',
+                                  fontWeight: 'bold',
+                                  verticalAlign: 'middle'
+                                }}>2 SLOTS</span>
+                              )}
+                            </td>
+                            <td>
+                              <span style={{ fontWeight: 'bold', color: '#27ae60' }}>
+                                {result.tps?.toFixed(2) || '-'}
+                              </span>
+                            </td>
+                            <td>{result.ttft?.toFixed(0) || '-'}</td>
+                            <td>{result.tpot?.toFixed(2) || '-'}</td>
+                            <td>
+                              <span style={{ fontWeight: 'bold', color: '#e67e22' }}>
+                                {result.gen_tps?.toFixed(2) || '-'}
+                              </span>
+                            </td>
+                            <td>{result.latency_p50?.toFixed(0) || '-'}</td>
+                            <td>{result.latency_p95?.toFixed(0) || '-'}</td>
+                            <td>{result.latency_p99?.toFixed(0) || '-'}</td>
+                            <td>
+                              <span style={{
+                                display: 'inline-block',
+                                padding: '2px 8px',
+                                borderRadius: '4px',
+                                fontWeight: 'bold',
+                                background: (result.error_rate || 0) > 5 ? '#e74c3c' : '#27ae60',
+                                color: 'white',
+                                fontSize: '0.85rem'
+                              }}>
+                                {result.error_rate?.toFixed(1) || '0'}%
+                              </span>
+                            </td>
+                          </tr>
+                          {isDual && (
+                            <tr style={{ background: '#f8f4fc' }}>
+                              <td colSpan={10} style={{ padding: '0 1rem 0.75rem 2rem' }}>
+                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+                                  <thead>
+                                    <tr>
+                                      <th style={{ textAlign: 'left', padding: '4px 8px', color: '#7f8c8d', fontWeight: 600, width: '20%' }}>Slot</th>
+                                      <th style={{ padding: '4px 8px', color: '#7f8c8d', fontWeight: 600 }}>TPS</th>
+                                      <th style={{ padding: '4px 8px', color: '#7f8c8d', fontWeight: 600 }}>TTFT (ms)</th>
+                                      <th style={{ padding: '4px 8px', color: '#7f8c8d', fontWeight: 600 }}>TPOT (ms)</th>
+                                      <th style={{ padding: '4px 8px', color: '#7f8c8d', fontWeight: 600 }}>GenTPS</th>
+                                      <th style={{ padding: '4px 8px', color: '#7f8c8d', fontWeight: 600 }}>P50 (ms)</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    <tr>
+                                      <td style={{ padding: '3px 8px', fontWeight: 600, color: '#2980b9' }}>👤 User</td>
+                                      <td style={{ padding: '3px 8px', textAlign: 'center', color: '#27ae60', fontWeight: 'bold' }}>{result.tps?.toFixed(2) || '—'}</td>
+                                      <td style={{ padding: '3px 8px', textAlign: 'center' }}>{result.ttft?.toFixed(0) || '—'}</td>
+                                      <td style={{ padding: '3px 8px', textAlign: 'center' }}>{result.tpot?.toFixed(2) || '—'}</td>
+                                      <td style={{ padding: '3px 8px', textAlign: 'center', color: '#e67e22', fontWeight: 'bold' }}>{result.gen_tps?.toFixed(2) || '—'}</td>
+                                      <td style={{ padding: '3px 8px', textAlign: 'center' }}>{result.latency_p50?.toFixed(0) || '—'}</td>
+                                    </tr>
+                                    <tr>
+                                      <td style={{ padding: '3px 8px', fontWeight: 600, color: '#8e44ad' }}>⚙️ Sistema</td>
+                                      <td style={{ padding: '3px 8px', textAlign: 'center', color: '#27ae60', fontWeight: 'bold' }}>{result.system_tps?.toFixed(2) || '—'}</td>
+                                      <td style={{ padding: '3px 8px', textAlign: 'center' }}>{result.system_ttft?.toFixed(0) || '—'}</td>
+                                      <td style={{ padding: '3px 8px', textAlign: 'center' }}>{result.system_tpot?.toFixed(2) || '—'}</td>
+                                      <td style={{ padding: '3px 8px', textAlign: 'center', color: '#e67e22', fontWeight: 'bold' }}>{result.system_gen_tps?.toFixed(2) || '—'}</td>
+                                      <td style={{ padding: '3px 8px', textAlign: 'center' }}>{result.system_latency_p50?.toFixed(0) || '—'}</td>
+                                    </tr>
+                                  </tbody>
+                                </table>
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
 
               {/* Response cross-table: scenarios × models */}
               {(() => {
-                const { scenarios, models, lookup } = getResponseMatrix();
+                const { scenarios, models, lookup, ragByScenario } = getResponseMatrix();
                 const hasAnyResponse = results.some(r => r.lastResponse || r.lastSystemResponse);
                 if (!hasAnyResponse) return null;
+                const hasRagChunks = Object.keys(ragByScenario).length > 0;
                 return (
+                  <>
                   <div className="card">
                     <div className="card-header">💬 Model Responses</div>
                     <p style={{ padding: '0.5rem 1rem 0', color: '#7f8c8d', fontSize: '0.85rem' }}>
@@ -852,6 +986,48 @@ function Results() {
                       </table>
                     </div>
                   </div>
+                  {hasRagChunks && (
+                    <div className="card" style={{ marginTop: '1rem' }}>
+                      <div className="card-header">🔍 RAG — Contexto Recuperado</div>
+                      <p style={{ padding: '0.5rem 1rem 0', color: '#7f8c8d', fontSize: '0.85rem' }}>
+                        Fragmentos del documento recuperados por Qdrant para cada escenario.
+                      </p>
+                      {scenarios.filter(s => ragByScenario[s]).map((scenario, si) => {
+                        const { chunks, latencyMs } = ragByScenario[scenario];
+                        return (
+                          <div key={si} style={{ padding: '0.75rem 1rem', borderTop: si > 0 ? '1px solid #dee2e6' : undefined }}>
+                            <div style={{ fontWeight: 600, marginBottom: '0.4rem', fontSize: '0.9rem' }}>
+                              {scenario}
+                              {latencyMs != null && (
+                                <span style={{ marginLeft: '0.75rem', fontSize: '0.75rem', color: '#7f8c8d', fontWeight: 400 }}>
+                                  retrieval: {latencyMs}ms
+                                </span>
+                              )}
+                            </div>
+                            {chunks.map((chunk, ci) => (
+                              <div key={ci} style={{
+                                marginBottom: '0.5rem',
+                                padding: '0.5rem 0.75rem',
+                                background: '#f8f9fa',
+                                borderRadius: '4px',
+                                borderLeft: '3px solid #0c5460',
+                                fontSize: '0.82rem',
+                                color: '#2c3e50',
+                                whiteSpace: 'pre-wrap',
+                                wordBreak: 'break-word'
+                              }}>
+                                <span style={{ fontSize: '0.72rem', color: '#7f8c8d', display: 'block', marginBottom: '4px' }}>
+                                  Chunk {ci + 1}{chunk.score != null ? ` · score: ${chunk.score.toFixed(4)}` : ''}
+                                </span>
+                                {chunk.text || chunk}
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                  </>
                 );
               })()}
             </>
