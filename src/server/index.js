@@ -705,7 +705,7 @@ app.post('/api/rag/ingest', async (req, res) => {
 
     res.json({ success: true, ...result, progress: progressLog });
   } catch (err) {
-    logger.error('RAG ingest error', { error: err.message });
+    logger.error('RAG ingest error', { error: err.message, response: err.response?.data });
     res.status(500).json({ error: err.message });
   }
 });

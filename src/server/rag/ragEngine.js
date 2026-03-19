@@ -12,7 +12,9 @@ export class RagEngine {
   }
 
   get _qdrantHeaders() {
-    return this.qdrantApiKey ? { 'api-key': this.qdrantApiKey } : {};
+    return this.qdrantApiKey
+      ? { 'api-key': this.qdrantApiKey, 'Authorization': `Bearer ${this.qdrantApiKey}` }
+      : {};
   }
 
   async embed(texts) {

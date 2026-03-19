@@ -690,7 +690,7 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
                   score: +c.score.toFixed(4),
                   pdf_name: c.payload.pdf_name,
                   page: c.payload.page,
-                  text: c.payload.text.slice(0, 500)
+                  text: c.payload.text
                 }));
                 result.raw.ragRetrievalMs = ragResult.latencyMs;
               }

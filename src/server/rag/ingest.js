@@ -53,7 +53,9 @@ export async function ingestPdf(pdfPath, ragConfig, onProgress) {
     chunk_overlap = 64
   } = ragConfig;
 
-  const qdrantHeaders = qdrant_api_key ? { 'api-key': qdrant_api_key } : {};
+  const qdrantHeaders = qdrant_api_key
+    ? { 'api-key': qdrant_api_key, 'Authorization': `Bearer ${qdrant_api_key}` }
+    : {};
   const pdfName = path.basename(pdfPath);
 
   // 1. Parsear PDF
