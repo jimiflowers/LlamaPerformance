@@ -494,7 +494,7 @@ function Benchmarks() {
           <div className="card-header">Select Benchmark Suite</div>
           <div className="form-group">
             <label className="form-label">Suite</label>
-            <div style={{ border: '1px solid #ced4da', borderRadius: '4px', overflow: 'hidden' }}>
+            <div style={{ border: '1px solid #ced4da', borderRadius: '4px', overflowY: 'auto', maxHeight: '160px' }}>
               {suites.map((suite, idx) => (
                 <div
                   key={suite.name}
