@@ -12,6 +12,8 @@ function Models() {
   const [selectedModel, setSelectedModel] = useState(null);
   const [modelInfo, setModelInfo] = useState(null);
   const [newModel, setNewModel] = useState({ alias: '', model_id: '' });
+  const [addAll, setAddAll] = useState(false);
+  const [addAllProgress, setAddAllProgress] = useState(null); // { done, total } | null
   const [conflictModal, setConflictModal] = useState(null); // { runningModel, targetId }
   const [paramsModal, setParamsModal] = useState(null); // model object being edited
   const [paramsForm, setParamsForm] = useState({
@@ -63,6 +65,33 @@ function Models() {
 
   const handleAddModel = async (e) => {
     e.preventDefault();
+    if (addAll) {
+      const existing = new Set(models.map(m => m.model_id));
+      const toAdd = availableModels.filter(m => !existing.has(m.id));
+      if (toAdd.length === 0) {
+        setSuccess('All available models are already added.');
+        setShowAddModal(false);
+        setAddAll(false);
+        setTimeout(() => setSuccess(null), 3000);
+        return;
+      }
+      setAddAllProgress({ done: 0, total: toAdd.length });
+      let added = 0;
+      for (const m of toAdd) {
+        try {
+          await modelsAPI.add({ alias: m.alias || m.id, model_id: m.id });
+          added++;
+        } catch {}
+        setAddAllProgress({ done: added, total: toAdd.length });
+      }
+      await loadModels();
+      setShowAddModal(false);
+      setAddAll(false);
+      setAddAllProgress(null);
+      setSuccess(`${added} model(s) added successfully.`);
+      setTimeout(() => setSuccess(null), 3000);
+      return;
+    }
     try {
       await modelsAPI.add(newModel);
       setSuccess('Model added successfully');
@@ -339,69 +368,92 @@ function Models() {
 
       {/* Add Model Modal */}
       {showAddModal && (
-        <div className="modal-overlay" onClick={() => setShowAddModal(false)}>
+        <div className="modal-overlay" onClick={() => { setShowAddModal(false); setAddAll(false); setAddAllProgress(null); }}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">Add Model</div>
             <form onSubmit={handleAddModel}>
-              <div className="form-group">
-                <label className="form-label">Model Alias</label>
+              {/* Add all checkbox */}
+              <div style={{ marginBottom: '1rem', padding: '10px 12px', background: '#f0f4ff', borderRadius: '6px', display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <input
-                  type="text"
-                  className="form-control"
-                  value={newModel.alias}
-                  onChange={(e) => setNewModel({ ...newModel, alias: e.target.value })}
-                  placeholder="e.g., phi-3-mini"
-                  required
+                  type="checkbox"
+                  id="addAllCheck"
+                  checked={addAll}
+                  onChange={(e) => setAddAll(e.target.checked)}
+                  style={{ width: '16px', height: '16px', cursor: 'pointer' }}
                 />
+                <label htmlFor="addAllCheck" style={{ cursor: 'pointer', fontWeight: 600, margin: 0 }}>
+                  Add all models ({availableModels.length} available)
+                </label>
               </div>
-              <div className="form-group">
-                <label className="form-label">Model ID</label>
-                <select
-                  className="form-control"
-                  value={newModel.model_id}
-                  onChange={(e) => {
-                    const selected = availableModels.find(m => m.id === e.target.value);
-                    setNewModel({
-                      alias: selected?.alias || e.target.value,
-                      model_id: e.target.value
-                    });
-                  }}
-                  required
-                >
-                  <option value="">Select a model...</option>
 
-                  {/* Catalog Models */}
-                  {catalogModels.length > 0 && (
-                    <optgroup label="Catalog Models">
-                      {catalogModels.map(m => (
-                        <option key={m.id} value={m.id}>
-                          {m.description || m.id}
-                        </option>
-                      ))}
-                    </optgroup>
-                  )}
+              {!addAll && (
+                <>
+                  <div className="form-group">
+                    <label className="form-label">Model Alias</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      value={newModel.alias}
+                      onChange={(e) => setNewModel({ ...newModel, alias: e.target.value })}
+                      placeholder="e.g., phi-3-mini"
+                      required
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Model ID</label>
+                    <select
+                      className="form-control"
+                      value={newModel.model_id}
+                      onChange={(e) => {
+                        const selected = availableModels.find(m => m.id === e.target.value);
+                        setNewModel({
+                          alias: selected?.alias || e.target.value,
+                          model_id: e.target.value
+                        });
+                      }}
+                      required
+                    >
+                      <option value="">Select a model...</option>
+                      {catalogModels.length > 0 && (
+                        <optgroup label="Catalog Models">
+                          {catalogModels.map(m => (
+                            <option key={m.id} value={m.id}>{m.description || m.id}</option>
+                          ))}
+                        </optgroup>
+                      )}
+                      {customModels.length > 0 && (
+                        <optgroup label="🔧 Custom Models">
+                          {customModels.map(m => (
+                            <option key={m.id} value={m.id}>{m.description || m.id}</option>
+                          ))}
+                        </optgroup>
+                      )}
+                    </select>
+                    <small style={{ color: '#7f8c8d', marginTop: '0.25rem', display: 'block' }}>
+                      Custom models from cache directory are marked with 🔧. Visit the Cache tab to manage.
+                    </small>
+                  </div>
+                </>
+              )}
 
-                  {/* Custom Models */}
-                  {customModels.length > 0 && (
-                    <optgroup label="🔧 Custom Models">
-                      {customModels.map(m => (
-                        <option key={m.id} value={m.id}>
-                          {m.description || m.id}
-                        </option>
-                      ))}
-                    </optgroup>
-                  )}
-                </select>
-                <small style={{ color: '#7f8c8d', marginTop: '0.25rem', display: 'block' }}>
-                  Custom models from cache directory are marked with 🔧. Visit the Cache tab to manage.
-                </small>
-              </div>
+              {addAll && addAllProgress && (
+                <div style={{ margin: '0.5rem 0 1rem', color: '#555', fontSize: '0.9rem' }}>
+                  Adding models... {addAllProgress.done} / {addAllProgress.total}
+                  <div style={{ background: '#e0e0e0', borderRadius: '4px', height: '6px', marginTop: '6px' }}>
+                    <div style={{ background: '#3498db', height: '6px', borderRadius: '4px', width: `${Math.round((addAllProgress.done / addAllProgress.total) * 100)}%`, transition: 'width 0.2s' }} />
+                  </div>
+                </div>
+              )}
+
               <div style={{ marginTop: '1.5rem' }}>
-                <button type="submit" className="btn btn-primary">Add Model</button>
-                <button 
-                  type="button" 
-                  className="btn btn-secondary" 
-                  onClick={() => setShowAddModal(false)}
+                <button type="submit" className="btn btn-primary" disabled={!!addAllProgress}>
+                  {addAll ? `Add All Models (${availableModels.length})` : 'Add Model'}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => { setShowAddModal(false); setAddAll(false); setAddAllProgress(null); }}
+                  disabled={!!addAllProgress}
                 >
                   Cancel
                 </button>
