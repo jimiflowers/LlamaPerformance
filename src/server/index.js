@@ -281,6 +281,19 @@ app.get('/api/system/health', async (req, res) => {
 });
 
 /**
+ * GET /api/system/stats-health
+ * Verifica si el servidor de métricas GPU (aion:9999) está disponible
+ */
+app.get('/api/system/stats-health', async (req, res) => {
+  try {
+    await axios.get('http://aion.home.lan:9999/gpu', { timeout: 3000 });
+    res.json({ available: true });
+  } catch {
+    res.json({ available: false });
+  }
+});
+
+/**
  * GET /api/cache/location
  * Muestra la ruta de Linux donde están tus modelos .gguf
  */

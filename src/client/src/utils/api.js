@@ -52,7 +52,8 @@ export const settingsAPI = {
 // System API
 export const systemAPI = {
   health: () => api.get('/system/health'),
-  stats: () => api.get('/system/stats')
+  stats: () => api.get('/system/stats'),
+  statsHealth: () => api.get('/system/stats-health')
 };
 
 // Cache API

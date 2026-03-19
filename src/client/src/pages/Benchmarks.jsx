@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { modelsAPI, benchmarksAPI, ragAPI } from '../utils/api';
+import { modelsAPI, benchmarksAPI, ragAPI, systemAPI } from '../utils/api';
 
 function Benchmarks() {
   const [models, setModels] = useState([]);
@@ -32,11 +32,22 @@ function Benchmarks() {
   const [runTotalModels, setRunTotalModels] = useState(null);
   const [runPauseRequested, setRunPauseRequested] = useState(false);
   const [aborting, setAborting] = useState(false);
+  const [statsAvailable, setStatsAvailable] = useState(null); // null=checking, true, false
+
+  const checkStatsEndpoint = async () => {
+    try {
+      const res = await systemAPI.statsHealth();
+      setStatsAvailable(res.data.available);
+    } catch {
+      setStatsAvailable(false);
+    }
+  };
 
   useEffect(() => {
     loadModels();
     loadSuites();
     loadRecentRuns();
+    checkStatsEndpoint();
     
     // Auto-refresh models and runs every 3 seconds
     const interval = setInterval(() => {
@@ -69,7 +80,9 @@ function Benchmarks() {
             setSuccess('✅ Benchmark completed!');
           } else if (res.data.status === 'aborted') {
             setAborting(false);
-            setSuccess('⏹ Benchmark aborted.');
+            try { await benchmarksAPI.deleteRun(currentRunId); } catch {}
+            setCurrentRunId(null);
+            setRunStatus(null);
           } else if (res.data.status === 'failed') {
             setError('❌ Benchmark failed. Check logs for details.');
           }
@@ -198,6 +211,18 @@ function Benchmarks() {
       return;
     }
 
+    // Verificar stats endpoint antes de lanzar
+    try {
+      const statsRes = await systemAPI.statsHealth();
+      if (!statsRes.data.available) {
+        setError('⚠️ El servidor de métricas GPU (aion:9999) no está disponible. Comprueba que el servicio está activo antes de lanzar el test.');
+        return;
+      }
+    } catch {
+      setError('⚠️ No se pudo verificar el servidor de métricas GPU. Comprueba la conexión con aion:9999.');
+      return;
+    }
+
     setLoading(true);
     setError(null);
 
@@ -287,6 +312,11 @@ function Benchmarks() {
       )}
       <h2 style={{ marginBottom: '1.5rem', fontSize: '2rem' }}>Benchmarks</h2>
 
+      {statsAvailable === false && (
+        <div style={{ background: '#fff3cd', border: '1px solid #ffc107', borderRadius: '6px', padding: '10px 16px', marginBottom: '1rem', color: '#856404', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          ⚠️ <strong>Servidor de métricas GPU no disponible</strong> — aion:9999 no responde. No se podrán recoger datos de CPU/GPU/VRAM durante el test. Comprueba que el servicio está activo.
+        </div>
+      )}
       {error && <div className="error">{error}</div>}
       {success && <div className="success">{success}</div>}
 

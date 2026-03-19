@@ -51,8 +51,10 @@ function Results() {
         if (res.data.status === 'aborted') {
           clearInterval(interval);
           setAborting(false);
-          loadResults(selectedRun);
-          loadRuns();
+          try { await benchmarksAPI.deleteRun(selectedRun); } catch {}
+          await loadRuns();
+          setResults([]);
+          setRunStatus(null);
         }
         if (res.data.status === 'failed') {
           clearInterval(interval);

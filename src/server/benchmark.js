@@ -94,7 +94,7 @@ class BenchmarkEngine {
   /**
    * ADAPTADO: Inferencia optimizada para el stream de llama.cpp
    */
-  async runSingleInference(modelInfo, scenario, config) {
+  async runSingleInference(modelInfo, scenario, config, runId) {
     const client = orchestrator.getOpenAIClient();
     const modelName = (modelInfo.id || '').replace(/\.gguf$/i, '');
 
@@ -128,6 +128,12 @@ class BenchmarkEngine {
           controller.abort();
           metrics.timeout = true;
         }, config.timeout || 60000);
+
+        // Propagate kill signal from abortBenchmark → abort this fetch immediately
+        const killSignal = runId ? this.runningBenchmarks.get(runId)?.killController?.signal : null;
+        if (killSignal && !killSignal.aborted) {
+          killSignal.addEventListener('abort', () => controller.abort(), { once: true });
+        }
 
         const maxTokens = scenario.max_tokens || 128;
         const temperature = slotType === 'system'
@@ -246,7 +252,7 @@ class BenchmarkEngine {
   /**
    * Run benchmark scenario for a model
    */
-  async runScenario(modelId, scenario, config, progressCallback) {
+  async runScenario(modelId, scenario, config, progressCallback, runId) {
     const benchmarkLogger = createBenchmarkLogger(modelId);
     
     // Get model info from storage first
@@ -295,8 +301,11 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
         progressCallback({ modelId, scenario: scenario.name, iteration: i + 1, total: config.iterations });
       }
 
+      // Check abort between iterations
+      if (runId && this.runningBenchmarks.get(runId)?.aborted) break;
+
       const [resourcesBefore, gpuBefore] = await Promise.all([this.collectResourceMetrics(), getGpuMetrics()]);
-      const inferenceResult = await this.runSingleInference(modelInfo, scenario, config);
+      const inferenceResult = await this.runSingleInference(modelInfo, scenario, config, runId);
       const [resourcesAfter, gpuAfter] = await Promise.all([this.collectResourceMetrics(), getGpuMetrics()]);
 
       const userM = inferenceResult.userMetrics;
@@ -452,12 +461,14 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
     });
 
     // Initialize running state
+    const killController = new AbortController();
     this.runningBenchmarks.set(runId, {
       id: runId,
       status: 'running',
       progress: 0,
       pauseRequested: false,
-      aborted: false
+      aborted: false,
+      killController
     });
 
     const runTask = async () => {
@@ -669,7 +680,8 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
                 modelId,
                 augScenario,
                 config,
-                progressCallback
+                progressCallback,
+                runId
               );
 
               // Adjuntar chunks RAG al raw_data para auditoría
@@ -805,7 +817,7 @@ const modelInfo = orchestrator.getLoadedModelInfo(modelId) || {
   abortBenchmark(runId) {
     const state = this.runningBenchmarks.get(runId);
     if (state && (state.status === 'running' || state.status === 'paused')) {
-      // If paused, set status to running so the pause wait loop exits, then aborted flag triggers break
+      state.killController?.abort(); // Mata el fetch activo inmediatamente
       this.runningBenchmarks.set(runId, { ...state, status: 'running', aborted: true, pauseRequested: false });
       return true;
     }
