@@ -13,6 +13,7 @@ function Results() {
   const [initialRunParam, setInitialRunParam] = useState(null);
   const [expandedCells, setExpandedCells] = useState(new Set());
   const [runPauseRequested, setRunPauseRequested] = useState(false);
+  const [aborting, setAborting] = useState(false);
 
   useEffect(() => {
     // Parse ?run=<runId>
@@ -49,6 +50,7 @@ function Results() {
         }
         if (res.data.status === 'aborted') {
           clearInterval(interval);
+          setAborting(false);
           loadResults(selectedRun);
           loadRuns();
         }
@@ -101,9 +103,11 @@ function Results() {
 
   const handleAbort = async () => {
     if (!selectedRun) return;
+    setAborting(true);
     try {
       await benchmarksAPI.abort(selectedRun);
     } catch (err) {
+      setAborting(false);
       setError(err.response?.data?.error || err.message);
     }
   };
@@ -284,6 +288,15 @@ function Results() {
 
   return (
     <div>
+      {aborting && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
+          <div style={{ background: 'white', padding: '32px 40px', borderRadius: '10px', textAlign: 'center', boxShadow: '0 8px 32px rgba(0,0,0,0.3)', minWidth: '280px' }}>
+            <div style={{ fontSize: '2rem', marginBottom: '12px' }}>⏹</div>
+            <div style={{ fontWeight: 700, fontSize: '1.1rem', marginBottom: '8px' }}>Abortando test...</div>
+            <div style={{ color: '#666', fontSize: '0.9rem' }}>Esperando a que finalice la subprueba actual</div>
+          </div>
+        </div>
+      )}
       <h2 style={{ marginBottom: '1.5rem', fontSize: '2rem' }}>Results</h2>
 
       {error && <div className="error">{error}</div>}
@@ -319,10 +332,11 @@ function Results() {
             <button
               type="button"
               className="btn btn-sm"
-              style={{ background: '#e74c3c', color: 'white', minWidth: '110px' }}
+              style={{ background: '#e74c3c', color: 'white', minWidth: '110px', opacity: aborting ? 0.6 : 1 }}
               onClick={handleAbort}
+              disabled={aborting}
             >
-              ⏹ Abort TEST
+              {aborting ? '⏳ Aborting...' : '⏹ Abort TEST'}
             </button>
           </div>
         </div>

@@ -31,6 +31,7 @@ function Benchmarks() {
   const [runModelIndex, setRunModelIndex] = useState(null);
   const [runTotalModels, setRunTotalModels] = useState(null);
   const [runPauseRequested, setRunPauseRequested] = useState(false);
+  const [aborting, setAborting] = useState(false);
 
   useEffect(() => {
     loadModels();
@@ -67,6 +68,7 @@ function Benchmarks() {
           if (res.data.status === 'completed') {
             setSuccess('✅ Benchmark completed!');
           } else if (res.data.status === 'aborted') {
+            setAborting(false);
             setSuccess('⏹ Benchmark aborted.');
           } else if (res.data.status === 'failed') {
             setError('❌ Benchmark failed. Check logs for details.');
@@ -240,9 +242,11 @@ function Benchmarks() {
 
   const handleAbort = async () => {
     if (!currentRunId) return;
+    setAborting(true);
     try {
       await benchmarksAPI.abort(currentRunId);
     } catch (err) {
+      setAborting(false);
       setError(err.response?.data?.error || err.message);
     }
   };
@@ -272,6 +276,15 @@ function Benchmarks() {
 
   return (
     <div>
+      {aborting && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
+          <div style={{ background: 'white', padding: '32px 40px', borderRadius: '10px', textAlign: 'center', boxShadow: '0 8px 32px rgba(0,0,0,0.3)', minWidth: '280px' }}>
+            <div style={{ fontSize: '2rem', marginBottom: '12px' }}>⏹</div>
+            <div style={{ fontWeight: 700, fontSize: '1.1rem', marginBottom: '8px' }}>Abortando test...</div>
+            <div style={{ color: '#666', fontSize: '0.9rem' }}>Esperando a que finalice la subprueba actual</div>
+          </div>
+        </div>
+      )}
       <h2 style={{ marginBottom: '1.5rem', fontSize: '2rem' }}>Benchmarks</h2>
 
       {error && <div className="error">{error}</div>}
@@ -318,10 +331,11 @@ function Benchmarks() {
             <button
               type="button"
               className="btn btn-sm"
-              style={{ background: '#e74c3c', color: 'white', minWidth: '110px' }}
+              style={{ background: '#e74c3c', color: 'white', minWidth: '110px', opacity: aborting ? 0.6 : 1 }}
               onClick={handleAbort}
+              disabled={aborting}
             >
-              ⏹ Abort TEST
+              {aborting ? '⏳ Aborting...' : '⏹ Abort TEST'}
             </button>
           </div>
         </div>
